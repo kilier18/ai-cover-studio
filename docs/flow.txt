@@ -1,0 +1,20 @@
+AI Cover Studio - pipeline
+==========================
+
+  song.mp3
+     |
+     v
+ [1] separate.py        (python-audio-separator; BS-Roformer / Mel-Band RoFormer)
+     |--> vocals.wav          lead vocal (optionally: strip backing vocals,
+     |                        remove reverb, backfill ambience into the inst.)
+     |--> instrumental.wav    accompaniment
+     |
+     v
+ [2] rvc_convert.py     (isolated copy of the RVC kernel, its own python 3.9)
+     |--> converted vocal (index_rate / protect / rms_mix / pre_gain / f0 ...)
+     |
+     v
+ [3] mix.py             (numpy + librosa + ffmpeg)
+     |--> final.mp3 / wav / flac / m4a   (gains, soft limiter, optional reverb)
+
+work/<song>/ holds every intermediate file; nothing is uploaded anywhere.

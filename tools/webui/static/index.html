@@ -1,0 +1,971 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AI 翻唱工坊</title>
+<style>
+  :root{
+    --bg:#0e1116; --panel:#161b22; --panel2:#1c2230; --line:#2a3240;
+    --txt:#e6edf3; --dim:#8b98a8; --acc:#4c8dff; --acc2:#28c76f; --warn:#ffb020; --err:#ff5d5d;
+  }
+  *{box-sizing:border-box}
+  [hidden]{display:none !important}
+  body{margin:0;background:var(--bg);color:var(--txt);font:14px/1.55 "Microsoft YaHei",-apple-system,Segoe UI,sans-serif}
+  header{padding:14px 22px;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:16px;position:sticky;top:0;background:rgba(14,17,22,.95);backdrop-filter:blur(8px);z-index:10}
+  header h1{font-size:17px;margin:0;font-weight:600;letter-spacing:.5px}
+  .dot{width:8px;height:8px;border-radius:50%;background:var(--dim);display:inline-block;margin-right:6px}
+  .dot.on{background:var(--acc2);box-shadow:0 0 8px var(--acc2)}
+  .steps{display:flex;gap:8px;margin-left:auto}
+  .steps button{background:transparent;border:1px solid var(--line);color:var(--dim);padding:7px 16px;border-radius:20px;cursor:pointer;font-size:13px}
+  .steps button.on{background:var(--acc);border-color:var(--acc);color:#fff}
+  .steps button.done{border-color:var(--acc2);color:var(--acc2)}
+  main{max-width:1100px;margin:0 auto;padding:20px 22px 60px}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:18px;margin-bottom:16px}
+  .card h2{font-size:15px;margin:0 0 14px;display:flex;align-items:center;gap:8px}
+  .card h2 .n{background:var(--panel2);border:1px solid var(--line);width:24px;height:24px;border-radius:50%;display:grid;place-items:center;font-size:12px;color:var(--dim);flex:none}
+  .drop{border:2px dashed var(--line);border-radius:12px;padding:26px;text-align:center;cursor:pointer;color:var(--dim);transition:.15s}
+  .drop:hover,.drop.over{border-color:var(--acc);color:var(--txt);background:var(--panel2)}
+  .drop b{color:var(--txt)}
+  .picked{display:flex;align-items:center;gap:10px;background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:10px 14px;margin-top:10px}
+  .picked .nm{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .picked .meta{color:var(--dim);font-size:12px;white-space:nowrap}
+  .row{display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end}
+  .field{display:flex;flex-direction:column;gap:6px;min-width:140px}
+  .field>label{font-size:12px;color:var(--dim);display:flex;align-items:center;gap:6px}
+  select,input[type=text],input[type=number]{background:var(--panel2);border:1px solid var(--line);color:var(--txt);padding:8px 10px;border-radius:8px;font-size:13px;outline:none}
+  select:focus,input:focus{border-color:var(--acc)}
+  button.primary{background:var(--acc);border:0;color:#fff;padding:10px 20px;border-radius:9px;font-size:14px;cursor:pointer;font-weight:600}
+  button.primary:disabled{opacity:.45;cursor:not-allowed}
+  button.ghost{background:var(--panel2);border:1px solid var(--line);color:var(--txt);padding:9px 15px;border-radius:9px;cursor:pointer;font-size:13px}
+  button.ghost.small{padding:5px 10px;font-size:12px}
+  button.link{background:none;border:0;color:var(--acc);cursor:pointer;font-size:12.5px;padding:0}
+  .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:12px}
+  .ctl{background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:11px 13px}
+  .ctl .top{display:flex;justify-content:space-between;font-size:12.5px;margin-bottom:7px;gap:8px}
+  .ctl .top .val{color:var(--acc);font-variant-numeric:tabular-nums;white-space:nowrap}
+  input[type=range]{width:100%;accent-color:var(--acc);height:18px}
+  .hint{font-size:12px;color:var(--dim)}
+  .bar{height:7px;background:var(--panel2);border-radius:4px;overflow:hidden;margin:14px 0 8px}
+  .bar i{display:block;height:100%;width:0;background:linear-gradient(90deg,var(--acc),var(--acc2));transition:width .25s}
+  .runmeta{display:flex;align-items:center;gap:12px;font-size:12.5px;color:var(--dim)}
+  .runmeta .phase{color:var(--txt)}
+  .runmeta .sp{flex:1}
+  pre.log{background:#0a0d12;border:1px solid var(--line);border-radius:9px;padding:10px;max-height:170px;overflow:auto;font:11.5px/1.5 ui-monospace,Consolas,monospace;color:#9fb3c8;white-space:pre-wrap;margin:10px 0 0}
+  audio{width:100%;margin-top:6px;filter:invert(.92) hue-rotate(180deg)}
+  .out{display:flex;gap:12px;flex-wrap:wrap;margin-top:12px}
+  .out .box{background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:10px 13px;flex:1;min-width:290px}
+  .out h4{margin:0 0 4px;font-size:13px;font-weight:600;color:var(--dim);display:flex;align-items:center;gap:6px}
+  .badge{font-size:11px;padding:2px 8px;border-radius:20px;border:1px solid var(--line);color:var(--dim);font-weight:400}
+  .badge.ok{color:var(--acc2);border-color:var(--acc2)}
+  .acts{display:flex;gap:14px;margin-top:8px;flex-wrap:wrap}
+  a.act{color:var(--acc);text-decoration:none;font-size:12.5px;cursor:pointer}
+  .muted{opacity:.45;pointer-events:none}
+  .tab{display:none}
+  .tab.on{display:block}
+  .tip{display:inline-grid;place-items:center;width:15px;height:15px;border-radius:50%;border:1px solid var(--line);color:var(--dim);font-size:10px;cursor:help;flex:none}
+  .tip:hover{border-color:var(--acc);color:var(--acc)}
+  #bubble{position:fixed;z-index:99;max-width:300px;background:#0b0f16;border:1px solid var(--acc);border-radius:10px;padding:10px 12px;font-size:12.5px;color:var(--txt);box-shadow:0 10px 30px #000a;display:none;line-height:1.6}
+  .toast{position:fixed;right:20px;bottom:20px;background:var(--panel2);border:1px solid var(--line);padding:12px 16px;border-radius:10px;box-shadow:0 8px 30px #0008;max-width:420px;opacity:0;transform:translateY(8px);transition:.2s;z-index:98}
+  .toast.show{opacity:1;transform:none}
+  .toast.err{border-color:var(--err);color:#ffcdcd}
+  .chips{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
+  .chip{background:var(--panel2);border:1px solid var(--line);color:var(--dim);padding:6px 12px;border-radius:20px;font-size:12.5px;cursor:pointer}
+  .chip:hover{border-color:var(--acc);color:var(--txt)}
+.modal{position:fixed;inset:0;background:rgba(0,0,0,.55);display:flex;align-items:center;
+  justify-content:center;z-index:99;padding:20px}
+.modal .card2{background:var(--panel);border:1px solid var(--line);border-radius:14px;
+  padding:22px 24px;max-width:640px;width:100%;box-shadow:0 20px 60px rgba(0,0,0,.5)}
+.modal h3{margin:0 0 6px;font-size:18px}
+.modal .sub{color:var(--dim);font-size:13px;margin-bottom:14px}
+.pathbox{background:#0d1117;border:1px solid var(--line);border-radius:8px;padding:10px 12px;
+  font-family:ui-monospace,Consolas,monospace;font-size:12.5px;color:#9be9a8;word-break:break-all;
+  max-height:120px;overflow:auto;margin-bottom:16px}
+.modal .acts{display:flex;gap:10px;justify-content:flex-end;flex-wrap:wrap}
+.cleanlist{display:flex;flex-direction:column;gap:8px;margin-top:4px;max-height:52vh;overflow:auto}
+.cleanrow{display:flex;align-items:flex-start;gap:10px;background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:10px 12px;cursor:pointer}
+.cleanrow:hover{border-color:var(--acc)}
+.cleanrow .cb{margin-top:3px;accent-color:var(--acc);width:16px;height:16px;flex:none}
+.cleanrow .info{flex:1;min-width:0}
+.cleanrow .nm{font-size:13px}
+.cleanrow .ds{font-size:12px;color:var(--dim);margin-top:2px}
+.cleanrow .sz{font-size:12px;color:var(--warn);white-space:nowrap;margin-top:2px}
+.cleanrow.empty{opacity:.45}
+.numbox{width:62px;margin-top:6px;background:var(--panel2,#11151c);color:var(--fg,#e8eef7);
+  border:1px solid var(--line,#26303d);border-radius:6px;padding:3px 6px;font-size:12px;
+  font-variant-numeric:tabular-nums}
+.numbox:focus{outline:none;border-color:var(--acc,#4da3ff)}
+</style>
+</head>
+<body>
+<header>
+  <h1>🎤 AI 翻唱工坊</h1>
+  <span class="hint" style="font-size:12px"><span class="dot" id="health"></span><span id="healthTxt">连接中…</span></span>
+  <div class="steps">
+    <button id="t1" class="on" data-tab="1">① 分离</button>
+    <button id="t2" data-tab="2">② 转换</button>
+    <button id="t3" data-tab="3">③ 合成</button>
+  </div>
+  <button class="ghost small" id="clean" title="一键删除各步骤留下的临时文件（成品 work/final 永远保留）">🧹 清理临时文件</button>
+  <button class="ghost small" id="quit" title="关闭本地服务（之后可重新双击桌面快捷方式启动）">⏻ 退出</button>
+</header>
+
+<main>
+  <!-- ================== 1 分离 ================== -->
+  <section class="tab on" id="tab1">
+    <div class="card">
+      <h2><span class="n">1</span>输入歌曲</h2>
+      <div class="drop" id="d1"><b>拖入歌曲</b> 或点击选择文件<br><span class="hint">mp3 / wav / flac / m4a / ogg / aac</span></div>
+      <input type="file" id="f1" accept="audio/*" hidden>
+      <div id="p1"></div>
+      <div class="chips" id="chips1"></div>
+    </div>
+
+    <div class="card">
+      <h2><span class="n">⚙</span>分离参数</h2>
+      <div class="row">
+        <div class="field" style="flex:1;min-width:280px">
+          <label>分离模型 <span class="tip" data-tip="推荐用「Kim 无串音版」：人声更干、背景和声残留最少。BS-Roformer 伴奏更干净但人声会带一点伴奏。换模型只影响纯净度，不影响速度档位。">?</span></label>
+          <select id="sepModel"></select>
+        </div>
+        <div class="field">
+          <label>批大小 batch <span class="tip" data-tip="一次并行处理几段音频。显存够就更快；6GB 显卡建议 2，爆显存（报 CUDA out of memory）就降到 1。">?</span></label>
+          <select id="sepBatch"><option>1</option><option selected>2</option><option>3</option><option>4</option></select>
+        </div>
+        <div class="field">
+          <label>分段长度 segment <span class="tip" data-tip="每段处理的帧数（默认 256）。越大上下文越完整，但更吃显存；一般不用改。">?</span></label>
+          <input type="number" id="sepSegment" placeholder="默认 256" min="64" max="1024" step="64">
+        </div>
+        <div class="field">
+          <label>重叠 overlap <span class="tip" data-tip="相邻两段的重叠比例（0~0.5）。调大可减少段落接缝处的咔哒声，代价是变慢。">?</span></label>
+          <input type="number" id="sepOverlap" placeholder="模型默认" min="0" max="0.9" step="0.05">
+        </div>
+        <div class="field">
+          <label>精度 <span class="tip" data-tip="fp16 半精度：更快更省显存，极少数情况有细噪声；遇到就换 fp32。">?</span></label>
+          <select id="sepFp16"><option value="1" selected>fp16（快）</option><option value="0">fp32（稳）</option></select>
+        </div>
+        <div class="field">
+          <label>只留主唱 <span class="tip" data-tip="默认不处理：直接把人声原样送进 RVC（推荐，保留下来的和声反而让声音更饱满）。只有当某首歌和声/双轨叠唱特别重、出现口胡或重复音时，才切到「去和声」——会多花约 30% 时间，且气声会略薄。">?</span></label>
+          <select id="sepLead"><option value="1">去和声（问题段再开）</option><option value="0" selected>保留全部人声（推荐）</option></select>
+        </div>
+        <div class="field">
+          <label>净化人声 <span class="tip" data-tip="分离完再跑一遍「去串音」模型，专门压掉人声里残留的伴奏/和声，代价是多花约 40% 时间。注意：实验性二次净化，目前实测会过度削人声，默认关闭；除非人声里伴奏残留特别重再试。">?</span></label>
+          <select id="sepPurify"><option value="1">开启（实验 · 更慢）</option><option value="0" selected>关闭（推荐）</option></select>
+        </div>
+        <div class="field">
+          <label>去混响/回声 <span class="tip" data-tip="对干声再跑一遍 DeReverb-Echo 模型（Mel-Band RoFormer），把录音里的房间混响和拖尾回声剥掉，只留直达声送进 RVC——回声重的歌会明显干净、口胡更少。代价：多花约 60% 时间。棚里录的、本来就很干净的人声可以关掉。">?</span></label>
+          <select id="sepDereverb"><option value="1" selected>开启（推荐 · 回声重时自动跳过）</option><option value="0">关闭</option></select>
+        </div>
+        <div class="field">
+          <label>伴奏保留混响 <span class="tip" data-tip="分离时人声被拿走后，原唱那层的混响/回声也跟着被拿走了，伴奏会留下一个“空房间”。开启后把被剥掉的混响层按 80% 回填进伴奏（需先开「去混响/回声」），人声走了但空间还在，效果器多的歌会更融。">?</span></label>
+          <select id="sepInstRev"><option value="0" selected>不处理（推荐）</option><option value="1">回填 1×（原量）</option><option value="1.5">回填 1.5×（更湿）</option></select>
+        </div>
+      </div>
+      <div style="margin-top:16px;display:flex;align-items:center;gap:12px">
+        <button class="primary" id="run1" disabled>开始分离</button>
+        <span class="hint" id="hint1">先选一个音频文件</span>
+      </div>
+      <div class="runbar" id="rb1" hidden>
+        <div class="bar"><i id="bar1"></i></div>
+        <div class="runmeta"><span class="phase" id="ph1">排队中…</span><span class="pct" id="pc1"></span><span class="sp"></span><span class="tm" id="tm1"></span><button class="ghost small" id="cx1">取消</button></div>
+        <pre class="log" id="lg1" hidden></pre>
+      </div>
+      <div class="out" id="out1" hidden>
+        <div class="box">
+          <h4>干声 Vocals <span class="badge ok">完成</span></h4>
+          <audio id="a1v" controls preload="metadata"></audio>
+          <div class="acts">
+            <a class="act" id="d1v" download>⬇ 导出</a>
+            <a class="act" data-open>📂 文件夹</a>
+            <a class="act" data-use="vocal">→ 送去转换</a>
+          </div>
+        </div>
+        <div class="box">
+          <h4>伴奏 Instrumental</h4>
+          <audio id="a1i" controls preload="metadata"></audio>
+          <div class="acts">
+            <a class="act" id="d1i" download>⬇ 导出</a>
+            <a class="act" data-open>📂 文件夹</a>
+            <a class="act" data-use="inst">→ 送去合成</a>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ================== 2 转换 ================== -->
+  <section class="tab" id="tab2">
+    <div class="card">
+      <h2><span class="n">2</span>输入人声</h2>
+      <div class="drop" id="d2"><b>拖入纯人声 / 干声</b> 或点击选择文件<br><span class="hint">任何已分离好的干声都可以直接丢进来，不必从第 1 步开始</span></div>
+      <input type="file" id="f2" accept="audio/*" hidden>
+      <div id="p2"></div>
+      <div class="chips" id="chips2"></div>
+    </div>
+
+    <div class="card">
+      <h2><span class="n">⚙</span>模型与参数
+        <button class="link" id="presetStable" style="margin-left:auto">预设 A · 抒情/气声（更像模型）</button>
+        <button class="link" id="presetHard">★ 默认 · 硬骨头 B（推荐）</button>
+      </h2>
+      <div class="row" style="align-items:flex-end">
+        <div class="field" style="flex:1;min-width:300px">
+          <label>RVC 模型 <span class="tip" data-tip="模型来自下面这些目录：本地的 rvc_models 是你自己导入的（可写），附加目录是只读借用。">?</span></label>
+          <select id="rvcModel"></select>
+        </div>
+        <div class="field" style="flex:0 0 auto">
+          <label>模型目录 <span class="tip" data-tip="新模型放这儿：把 .pth（和同名 .index）拖进窗口或点「导入」，会自动建同名子文件夹。">?</span></label>
+          <div style="display:flex;gap:8px;align-items:center">
+            <button class="link" id="openModels" style="white-space:nowrap">📂 打开</button>
+            <button class="link" id="importModels" style="white-space:nowrap">⬆ 导入模型</button>
+            <input type="file" id="modelFiles" accept=".pth,.index,.jpg,.png,.jpeg" multiple hidden>
+          </div>
+        </div>
+        <div class="field">
+          <label>检索索引 <span class="tip" data-tip="自动=用模型自带的 .index 做音色检索；关掉更快但音色相似度下降。">?</span></label>
+          <select id="indexMode"><option value="auto" selected>自动</option><option value="none">不使用</option></select>
+        </div>
+        <div class="field">
+          <label>精度 <span class="tip" data-tip="半精度更快；若出现电流声/杂音可切全精度。">?</span></label>
+          <select id="isHalf"><option value="1" selected>fp16</option><option value="0">fp32</option></select>
+        </div>
+      </div>
+      <div class="grid" style="margin-top:14px">
+        <div class="ctl">
+          <div class="top"><span>音高 pitch <span class="tip" data-tip="整体升降调（半音）。同性别唱 0；男声唱女声 +12；女声唱男声 −12。原唱是女声、模型也是女声就保持 0。">?</span></span><span class="val" id="vPitch">0</span></div>
+          <input type="range" id="pitch" min="-24" max="24" step="1" value="0">
+        </div>
+        <div class="ctl">
+          <div class="top"><span>检索比例 index_rate <span class="tip" data-tip="越高越贴近目标音色，过高会出现金属感/毛刺、高音更容易破。常用 0.4~0.6。">?</span></span><span class="val" id="vIndexRate">0.50</span></div>
+          <input type="range" id="indexRate" min="0" max="1" step="0.01" value="0.50">
+        </div>
+        <div class="ctl">
+          <div class="top"><span>音量包络 rms_mix_rate <span class="tip" data-tip="0=完全跟随原唱的音量起伏，1=完全用模型自己的能量。默认 0.20 最贴身，想更平稳（少起伏）就调大。">?</span></span><span class="val" id="vRms">0.30</span></div>
+          <input type="range" id="rmsMixRate" min="0" max="1" step="0.01" value="0.30">
+        </div>
+        <div class="ctl">
+          <div class="top"><span>保护 protect <span class="tip" data-tip="保护气声、清辅音，防止破音。高音突然断裂或出现重复/卡住的音时，先把它调到 0.4~0.5。">?</span></span><span class="val" id="vProtect">0.40</span></div>
+          <input type="range" id="protect" min="0" max="0.5" step="0.01" value="0.40">
+        </div>
+        <div class="ctl">
+          <div class="top"><span>滤波半径 filter_radius <span class="tip" data-tip="0~7 是内核的真实范围（再大没有额外效果）。注意：这一版内核里它只对 harvest 生效（大于 2 就把音高曲线做一次 3 点中值滤波），rmvpe / crepe 下几乎不起作用——想让音高更稳，优先用 rmvpe + protect，或者把 f0 换成 harvest。">?</span></span><span class="val" id="vFilter">7</span></div>
+          <input type="range" id="filterRadius" min="0" max="7" step="1" value="7">
+        </div>
+        <div class="ctl">
+          <div class="top"><span>输入增益 pre_gain <span class="tip" data-tip="送进 RVC 之前先把干声整体推响（dB），范围 0~30，可以半格微调。气声、和声、弱音在很小声时 RVC 特征提不准，容易口胡；推 +12~+18dB 往往能救回来。注意：源干声峰值本来就接近满量程时，推多少都会被削波卡住（实测某首歌写 +10 只真推了 1.5dB），这时改用下面的「弱音提升」。转换完会自动把响度还原到原来的档位。">?</span></span><span class="val" id="vPreGain">10</span></div>
+          <input type="range" id="preGain" min="0" max="30" step="0.5" value="10">
+        </div>
+        <div class="ctl">
+          <div class="top"><span>弱音提升 auto_level <span class="tip" data-tip="只把偏小的段落/气声往上抬（最多这么多 dB），响的段落不动，所以不会让成品变大声或爆音。比整体 pre_gain 更针对“某些地方太小声导致口胡”的情况；抬太多会把分离残留的噪声一起放大。">?</span></span><span class="val"></span></div>
+          <select id="autoLevel" style="width:100%">
+            <option value="0" selected>关闭</option>
+            <option value="6">+6 dB</option>
+            <option value="12">+12 dB（激进）</option>
+          </select>
+        </div>
+        <div class="ctl">
+          <div class="top"><span>单段推理时长 <span class="tip" data-tip="每次送进模型的音频最长多少秒，范围 20~240。65s 是内核原值，本工具默认 100s——实测多音源、多模型下整首气口更稳、连唱不断。调大＝切点更少、长句更连贯，但耗时按平方级上涨（150 秒音频：65s 用 20 秒，120s 要 56 秒，240s 可能爆显存）；6GB 显存建议不超过 120。调小＝更快更省显存，代价是接缝变多。">?</span></span><span class="val" id="vSeg">100s</span></div>
+          <input type="range" id="maxSegment" min="20" max="240" step="5" value="100">
+        </div>
+        <div class="ctl">
+          <div class="top"><span>检索邻居数 index_k <span class="tip" data-tip="每一帧从音色库里取多少个最近邻做加权平均，范围 2~128（受索引文件大小限制，超出不会报错）。内核原值 8，本工具默认 10。调大＝更平滑统一、稍带平均感；调小＝更贴近模型自己的音色、细节多但容易抖。对速度影响很小，但调得很大（如 128）时检索会明显变慢。">?</span></span><span class="val" id="vIdxK">28</span></div>
+          <input type="range" id="indexK" min="2" max="128" step="1" value="28">
+        </div>
+        <div class="ctl">
+          <div class="top"><span>音高算法 f0 <span class="tip" data-tip="rmvpe 综合最好；高音/美声可试 crepe 或 harvest；pm 最快但最粗糙。">?</span></span><span class="val"></span></div>
+          <select id="f0Method" style="width:100%">
+            <option value="rmvpe">rmvpe（顺滑、快）</option>
+            <option value="harvest">harvest（稳、慢）</option>
+            <option value="crepe" selected>crepe（默认 · 气声稳）</option>
+            <option value="pm">pm（快、粗糙）</option>
+          </select>
+        </div>
+        <div class="ctl">
+          <div class="top"><span>重采样 resample_sr <span class="tip" data-tip="输出采样率。跟随模型即可（40k 模型出 40k，合成时自动升到 44.1k）。">?</span></span><span class="val" id="vResample">跟随模型</span></div>
+          <select id="resampleSr" style="width:100%">
+            <option value="0" selected>跟随模型</option>
+            <option value="32000">32000</option><option value="40000">40000</option>
+            <option value="44100">44100</option><option value="48000">48000</option>
+          </select>
+        </div>
+      </div>
+      <details style="margin-top:12px">
+        <summary class="hint" style="cursor:pointer">实时变声专用参数（离线渲染不生效，仅供对照）</summary>
+        <div class="grid muted" style="margin-top:10px">
+          <div class="ctl"><div class="top"><span>formant 共振峰</span><span class="val">0</span></div><input type="range" min="-24" max="24" value="0" disabled></div>
+          <div class="ctl"><div class="top"><span>block_time</span><span class="val">0.21</span></div><input type="range" disabled value="0.21"></div>
+          <div class="ctl"><div class="top"><span>threhold 门限</span><span class="val">-60</span></div><input type="range" disabled value="-60"></div>
+          <div class="ctl"><div class="top"><span>crossfade_time</span><span class="val">0.08</span></div><input type="range" disabled value="0.08"></div>
+        </div>
+      </details>
+    </div>
+
+    <div class="card">
+      <h2><span class="n">▷</span>试听片段（只转换一小段，几秒钟出结果）</h2>
+      <div class="row">
+        <div class="field" style="flex:1;min-width:260px">
+          <label>起点（秒） <span class="hint" id="durHint"></span></label>
+          <input type="range" id="start" min="0" max="240" step="1" value="0" style="width:100%">
+        </div>
+        <div class="field">
+          <label>起点数值</label>
+          <input type="number" id="startNum" min="0" step="1" value="0" style="width:110px">
+        </div>
+        <div class="field">
+          <label>时长</label>
+          <select id="prevDur"><option>8</option><option selected>15</option><option>20</option><option>30</option></select>
+        </div>
+        <button class="primary" id="runPrev" disabled>生成试听</button>
+      </div>
+      <div class="runbar" id="rbP" hidden>
+        <div class="bar"><i id="barP"></i></div>
+        <div class="runmeta"><span class="phase" id="phP">排队中…</span><span class="pct" id="pcP"></span><span class="sp"></span><span class="tm" id="tmP"></span><button class="ghost small" id="cxP">取消</button></div>
+        <pre class="log" id="lgP" hidden></pre>
+      </div>
+      <div class="out" id="outP" hidden>
+        <div class="box"><h4>原干声（片段）</h4><audio id="aP0" controls preload="metadata"></audio></div>
+        <div class="box"><h4>转换后 <span class="badge ok">新</span></h4><audio id="aP1" controls preload="metadata"></audio></div>
+        <div class="box" id="boxPMix"><h4>混上伴奏试听 <span class="badge ok">推荐</span></h4><audio id="aP2" controls preload="metadata"></audio></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2><span class="n">▶</span>整曲转换</h2>
+      <div class="row">
+        <button class="primary" id="run2" disabled>转换整首人声</button>
+        <span class="hint" id="hint2">需要先选择人声文件</span>
+      </div>
+      <div class="runbar" id="rb2" hidden>
+        <div class="bar"><i id="bar2"></i></div>
+        <div class="runmeta"><span class="phase" id="ph2">排队中…</span><span class="pct" id="pc2"></span><span class="sp"></span><span class="tm" id="tm2"></span><button class="ghost small" id="cx2">取消</button></div>
+        <pre class="log" id="lg2" hidden></pre>
+      </div>
+      <div class="out" id="out2" hidden>
+        <div class="box">
+          <h4>转换后的人声 <span class="badge ok">完成</span></h4>
+          <audio id="a2" controls preload="metadata"></audio>
+          <div class="acts">
+            <a class="act" id="d2out" download>⬇ 导出</a>
+            <a class="act" data-open>📂 文件夹</a>
+            <a class="act" data-use="conv">→ 送去合成</a>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ================== 3 合成 ================== -->
+  <section class="tab" id="tab3">
+    <div class="card">
+      <h2><span class="n">3</span>输入两条音轨</h2>
+      <div class="row">
+        <div class="field" style="flex:1;min-width:300px">
+          <label>人声轨 <span class="tip" data-tip="通常用第 2 步转换后的新人声；也可以直接上传任意人声文件。">?</span></label>
+          <div class="drop mini" id="d3v" style="padding:16px">拖入 / 选择人声文件</div>
+          <div id="p3v"></div>
+        </div>
+        <div class="field" style="flex:1;min-width:300px">
+          <label>伴奏轨 <span class="tip" data-tip="用第 1 步分离出的伴奏；也可以上传现成伴奏/卡拉OK音轨。">?</span></label>
+          <div class="drop mini" id="d3i" style="padding:16px">拖入 / 选择伴奏文件</div>
+          <div id="p3i"></div>
+        </div>
+      </div>
+      <input type="file" id="f3v" accept="audio/*" hidden>
+      <input type="file" id="f3i" accept="audio/*" hidden>
+      <div class="chips" id="chips3"></div>
+    </div>
+
+    <div class="card">
+      <h2><span class="n">⚙</span>混音与导出</h2>
+      <div class="row">
+        <div class="field">
+          <label>人声音量（dB） <span class="tip" data-tip="相对原始电平的增减。人声通常比伴奏高 1~2 dB 更清楚。">?</span></label>
+          <input type="number" id="vocalGain" value="0" step="0.5" min="-24" max="12" style="width:120px">
+        </div>
+        <div class="field">
+          <label>伴奏音量（dB） <span class="tip" data-tip="伴奏太吵可 -1 ~ -3 dB；人声被压住就再调低一点伴奏。">?</span></label>
+          <input type="number" id="instGain" value="0" step="0.5" min="-24" max="12" style="width:120px">
+        </div>
+        <div class="field">
+          <label>输出格式 <span class="tip" data-tip="WAV 无损（文件大）；MP3 320k 适合分享；FLAC 无损压缩。">?</span></label>
+          <select id="fmt"><option value="wav" selected>WAV 24bit</option><option value="flac">FLAC</option><option value="mp3">MP3 320k</option><option value="m4a">M4A</option></select>
+        </div>
+        <div class="field">
+          <label>限幅器 <span class="tip" data-tip="软限幅，防止两轨叠加后削波爆音。关掉会更通透，但峰值可能过 1.0。">?</span></label>
+          <select id="limiter"><option value="1" selected>开</option><option value="0">关</option></select>
+        </div>
+        <div class="field">
+          <label>人声混响 <span class="tip" data-tip="只加在转换后的人声上（平行送出，不动干声），用来把干净的新人声粘回伴奏的空间里。0=关。效果器重的歌 12~20% 常有明显帮助；加多了人声会糊、字会拖尾。">?</span></label>
+          <input type="range" id="reverb" min="0" max="80" step="1" value="0">
+          <span class="val" id="vRev">0%</span>
+        </div>
+        <div class="field">
+          <label>混响时长 <span class="tip" data-tip="混响尾巴的长度。1.2s 偏紧（流行/电子），1.8s 自然，2.5s 以上偏大厅/抒情。">?</span></label>
+          <input type="range" id="revDecay" min="0.3" max="6" step="0.05" value="1.8">
+          <span class="val" id="vRevD">1.8s</span>
+        </div>
+        <div class="field">
+          <label>成品名</label>
+          <input type="text" id="outName" placeholder="留空自动命名" style="width:180px">
+        </div>
+        <button class="primary" id="run3" disabled>合成成品</button>
+      </div>
+      <div class="runbar" id="rb3" hidden>
+        <div class="bar"><i id="bar3"></i></div>
+        <div class="runmeta"><span class="phase" id="ph3">排队中…</span><span class="pct" id="pc3"></span><span class="sp"></span><span class="tm" id="tm3"></span><button class="ghost small" id="cx3">取消</button></div>
+        <pre class="log" id="lg3" hidden></pre>
+      </div>
+      <div class="out" id="out3" hidden>
+        <div class="box">
+          <h4>成品 <span class="badge ok">完成</span></h4>
+          <audio id="a3" controls preload="metadata"></audio>
+          <div class="acts">
+            <a class="act" id="d3out" download>⬇ 导出</a>
+            <a class="act" data-open>📂 文件夹</a>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+</main>
+
+<div id="bubble"></div>
+<div class="toast" id="toast"></div>
+<div class="modal" id="savedModal" hidden>
+  <div class="card2">
+    <h3 id="svTitle">✅ 完成</h3>
+    <div class="sub" id="svSub">产物已保存到：</div>
+    <div class="pathbox" id="svPath"></div>
+    <div class="acts">
+      <button class="ghost" id="svCopy">复制路径</button>
+      <button class="ghost" id="svOpen">📂 打开文件夹</button>
+      <button class="ghost" id="svClean">🧹 清理临时文件</button>
+      <button class="pri" id="svClose">知道了</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal" id="cleanModal" hidden>
+  <div class="card2">
+    <h3>🧹 清理临时文件</h3>
+    <div class="sub">成品目录 <b>work/final</b> 永远保留。删掉的是中间产物，删了要多花一次分离/转换的时间。</div>
+    <div class="cleanlist" id="cleanList"></div>
+    <div class="acts">
+      <button class="ghost" id="cleanCancel">取消</button>
+      <button class="pri" id="cleanGo">删除选中</button>
+    </div>
+  </div>
+</div>
+
+<script>
+const $ = s => document.querySelector(s);
+const $$ = s => [...document.querySelectorAll(s)];
+const S = { models: [], sep: [], song: null, vocal: null, inst: null, conv: null, mixed: null, durs: {} };
+
+/* ---------- 基础 ---------- */
+function toast(msg, err){
+  const t = $('#toast'); t.textContent = msg; t.className = 'toast show' + (err ? ' err' : '');
+  clearTimeout(t._h); t._h = setTimeout(() => t.className = 'toast', 4500);
+}
+async function api(path, body){
+  const r = await fetch(path, body ? {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)} : {});
+  const j = await r.json().catch(() => ({}));
+  if(!r.ok) throw new Error(j.error || ('HTTP ' + r.status));
+  return j;
+}
+function fmtT(s){ s = Math.max(0, Math.round(s)); return `${String(Math.floor(s/60)).padStart(2,'0')}:${String(s%60).padStart(2,'0')}`; }
+function setTab(n){ $$('.tab').forEach(t => t.classList.remove('on')); $$('.steps button').forEach(b => b.classList.toggle('on', b.dataset.tab == String(n))); $('#tab'+n).classList.add('on'); }
+$$('.steps button').forEach(b => b.onclick = () => setTab(b.dataset.tab));
+$('#quit').onclick = async () => {
+  if(!confirm('关闭本地 AI 翻唱服务？\n（处理中的任务会停止；下次双击桌面快捷方式即可重新启动）')) return;
+  try{ await fetch('/api/shutdown', {method:'POST'}); }catch(_){}
+  document.body.innerHTML = '<div style="display:grid;place-items:center;height:100vh;color:#8b98a8;font-size:15px">服务已关闭，可以关掉这个页面了。<br><span style="font-size:13px">需要时双击桌面「AI 翻唱工坊」重新启动。</span></div>';
+};
+
+/* ---------- 提示气泡 ---------- */
+const bubble = $('#bubble');
+document.addEventListener('click', e => {
+  const tip = e.target.closest('[data-tip]');
+  if(!tip){ bubble.style.display = 'none'; return; }
+  e.preventDefault();
+  bubble.textContent = tip.dataset.tip;
+  const r = tip.getBoundingClientRect();
+  bubble.style.display = 'block';
+  bubble.style.left = Math.min(window.innerWidth - 320, Math.max(10, r.left - 40)) + 'px';
+  bubble.style.top = (r.bottom + 8) + 'px';
+});
+
+/* ---------- 上传 ---------- */
+async function upload(file){
+  const fd = new FormData(); fd.append('file', file);
+  const r = await fetch('/api/upload', {method:'POST', body: fd});
+  const j = await r.json();
+  if(!r.ok) throw new Error(j.error || '上传失败');
+  S.durs[j.path] = j.duration || 0;
+  return j;
+}
+function wireDrop(dropEl, inputEl, onFile){
+  const original = dropEl.innerHTML;
+  const restore = () => { dropEl.innerHTML = original; };
+  dropEl.onclick = () => inputEl.click();
+  dropEl.ondragover = e => { e.preventDefault(); dropEl.classList.add('over'); };
+  dropEl.ondragleave = () => dropEl.classList.remove('over');
+  dropEl.ondrop = async e => {
+    e.preventDefault(); dropEl.classList.remove('over');
+    const f = e.dataTransfer.files[0];
+    if(!f) return;
+    dropEl.innerHTML = `上传中：${f.name} …`;
+    try{ await onFile(f); }catch(err){ toast(err.message, true); }
+    restore();
+  };
+  inputEl.onchange = async () => {
+    if(!inputEl.files.length) return;
+    try{ await onFile(inputEl.files[0]); }catch(err){ toast(err.message, true); }
+    inputEl.value = '';
+  };
+}
+function pickedHtml(info){
+  const parts = [];
+  if(info.duration) parts.push(fmtT(info.duration));
+  if(info.sample_rate) parts.push((info.sample_rate/1000).toFixed(1)+'k');
+  if(info.mb) parts.push(info.mb+'MB');
+  return `<div class="picked"><span>🎵</span><span class="nm" title="${info.path}">${info.name}</span><span class="meta">${parts.join(' · ')}</span></div>`;
+}
+
+/* ---------- 完成后弹窗：显示保存位置 ---------- */
+let SAVED_PATH = '';
+const FILE_RE = /\.(wav|mp3|flac|m4a|ogg|aac)$/i;
+function showSaved(j){
+  const raw = j.reveal || (j.result && (j.result.out || j.result.mixed || j.result.vocals)) || '';
+  if(!raw) return;
+  SAVED_PATH = raw;
+  const isFile = FILE_RE.test(raw);
+  $('#svPath').textContent = raw;
+  $('#svSub').textContent = isFile ? '成品已保存为：' : '产物已保存到目录：';
+  $('#svTitle').textContent = '✅ ' + (j.title || '完成');
+  $('#svOpen').textContent = isFile ? '📂 打开所在文件夹' : '📂 打开文件夹';
+  $('#savedModal').hidden = false;
+}
+$('#svClose').onclick = () => { $('#savedModal').hidden = true; };
+$('#svCopy').onclick = async () => {
+  try{ await navigator.clipboard.writeText(SAVED_PATH); toast('路径已复制'); }
+  catch(e){ toast('复制失败，手动选中上面的路径', true); }
+};
+$('#svOpen').onclick = async () => {
+  try{ const r = await api('/api/open?p=' + encodeURIComponent(SAVED_PATH), {}); toast('已打开 ' + r.dir); }
+  catch(e){ toast(e.message, true); }
+};
+
+
+/* ---------- 清理临时文件 ---------- */
+let CLEAN_ITEMS = [];
+function fmtMB(mb){
+  return mb >= 1024 ? (mb/1024).toFixed(2) + ' GB' : (mb >= 10 ? Math.round(mb) : mb.toFixed(1)) + ' MB';
+}
+async function openClean(){
+  let d;
+  try{ d = await api('/api/cleanup'); }catch(e){ toast(e.message, true); return; }
+  CLEAN_ITEMS = d.items || [];
+  const box = $('#cleanList');
+  box.innerHTML = CLEAN_ITEMS.map(it => {
+    const on = it.files > 0;
+    const size = it.bytes >= 1073741824 ? (it.bytes/1073741824).toFixed(2)+' GB' : fmtMB(it.mb);
+    return `<div class="cleanrow ${on ? '' : 'empty'}" data-key="${it.key}">
+      <input type="checkbox" class="cb" ${on && it.default ? 'checked' : ''} ${on ? '' : 'disabled'}>
+      <div class="info"><div class="nm">${it.label} <span style="color:var(--dim);font-size:12px">${on ? it.files + ' 个文件' : '空'}</span></div>
+        <div class="ds">${it.desc}</div></div>
+      <div class="sz">${on ? size : '—'}</div></div>`;
+  }).join('');
+  box.querySelectorAll('.cleanrow').forEach(row => {
+    row.addEventListener('click', ev => {
+      const cb = row.querySelector('.cb');
+      if(cb.disabled) return;
+      if(ev.target !== cb) cb.checked = !cb.checked;
+      updCleanTotal();
+    });
+  });
+  updCleanTotal();
+  $('#cleanModal').hidden = false;
+}
+function cleanKeys(){
+  return [...$('#cleanList').querySelectorAll('.cleanrow')]
+    .filter(r => r.querySelector('.cb').checked).map(r => r.dataset.key);
+}
+function updCleanTotal(){
+  const keys = cleanKeys();
+  const b = CLEAN_ITEMS.filter(i => keys.includes(i.key)).reduce((a, i) => a + (i.bytes || 0), 0);
+  const go = $('#cleanGo');
+  go.textContent = keys.length ? '删除选中（' + (b >= 1073741824 ? (b/1073741824).toFixed(2)+' GB' : fmtMB(b/1048576)) + '）' : '删除选中';
+  go.disabled = keys.length === 0;
+}
+$('#clean').onclick = openClean;
+$('#svClean').onclick = () => { $('#savedModal').hidden = true; openClean(); };
+$('#cleanCancel').onclick = () => { $('#cleanModal').hidden = true; };
+$('#cleanGo').onclick = async () => {
+  const keys = cleanKeys();
+  if(!keys.length) return;
+  const go = $('#cleanGo');
+  go.disabled = true; go.textContent = '删除中…';
+  try{
+    const r = await api('/api/cleanup', {keys});
+    if(r.errors && r.errors.length) toast('部分没删掉：' + r.errors.join('；'), true);
+    else toast('已清理 ' + (r.freed_mb >= 1024 ? (r.freed_mb/1024).toFixed(2)+' GB' : fmtMB(r.freed_mb)) + '，成品 ' + r.kept_final + ' 个保留在 work/final');
+    await openClean();
+    if(!$('#cleanList').querySelector('.cb:not(:disabled)')) $('#cleanModal').hidden = true;
+  }catch(e){ toast(e.message, true); go.disabled = false; updCleanTotal(); }
+};
+
+/* ---------- 通用任务运行器 ---------- */
+function runJob(jobId, ui){
+  const t0 = Date.now();
+  let lastStatus = '';
+  const timer = setInterval(async () => {
+    let j;
+    try{ j = await api('/api/job/' + jobId); }catch(e){ clearInterval(timer); toast(e.message, true); return; }
+    ui.bar.style.width = (j.progress || 0) + '%';
+    ui.pct.textContent = (j.progress || 0) + '%';
+    ui.tm.textContent = j.elapsed ? j.elapsed.toFixed(0) + ' 秒' : '';
+    if(j.status === 'queued') ui.phase.textContent = '排队中（同一时间只跑一个任务）';
+    else if(j.status === 'running'){
+      const label = (j.steps && j.steps[j.step]) || '处理中';
+      ui.phase.textContent = `第 ${(j.step|0)+1}/${(j.steps||[]).length} 步：${label}`;
+    }
+    ui.log.hidden = false;
+    if(j.log && j.log.length) ui.log.textContent = j.log.join('\n');
+    ui.log.scrollTop = ui.log.scrollHeight;
+    if(j.status !== lastStatus && (j.status === 'error' || j.status === 'canceled')) toast(j.error || '任务已取消', j.status === 'error');
+    lastStatus = j.status;
+    if(j.status !== 'running' && j.status !== 'queued'){
+      clearInterval(timer);
+      ui.cx.hidden = true;
+      if(j.status === 'done'){
+        ui.bar.style.width = '100%'; ui.pct.textContent = '100%';
+        ui.phase.textContent = '完成';
+        ui.onDone && ui.onDone(j);
+        showSaved(j);
+      } else {
+        ui.phase.textContent = j.status === 'canceled' ? '已取消' : '失败';
+        ui.onFail && ui.onFail(j);
+      }
+    }
+  }, 700);
+  ui.cx.onclick = async () => {
+    ui.cx.disabled = true;
+    try{ await api(`/api/job/${jobId}/cancel`, {}); toast('已请求取消'); }catch(e){ toast(e.message, true); }
+  };
+}
+function uiOf(n){
+  return {bar: $('#bar'+n), pct: $('#pc'+n), phase: $('#ph'+n), tm: $('#tm'+n),
+          log: $('#lg'+n), cx: $('#cx'+n), box: $('#rb'+n)};
+}
+function startUI(ui){ ui.box.hidden = false; ui.log.hidden = true; ui.log.textContent = ''; ui.cx.hidden = false; ui.cx.disabled = false; ui.bar.style.width = '0%'; ui.pct.textContent = ''; ui.phase.textContent = '排队中…'; }
+
+/* ---------- 模型列表 ---------- */
+async function loadModels(){
+  const j = await api('/api/models');
+  S.models = j.rvc; S.sep = j.separation;
+  $('#sepModel').innerHTML = j.separation.map(m => `<option value="${m.file}">${m.label || m.file} · ${m.size_mb}MB</option>`).join('');
+  const best = j.separation.find(m => m.recommended) || j.separation[0];
+  if(best) $('#sepModel').value = best.file;
+  $('#rvcModel').innerHTML = j.rvc.map(m => {
+    const tag = (m.writable ? '本地' : '附加');
+    const nm = /^\d+$/.test(m.name) ? m.name + ' 号' : m.name;
+    return `<option value="${m.id}">[${tag}] ${nm} · ${m.pth.replace('.pth','')}${m.index ? ' · index '+m.index_mb+'MB' : ' · 无索引'}</option>`;
+  }).join('');
+  const fav = j.rvc.find(m => m.name === '6') || j.rvc[0];
+  if(fav) $('#rvcModel').value = fav.id;
+  S.roots = j.roots || []; S.localModels = j.local_models;
+  $('#health').classList.add('on');
+  $('#healthTxt').textContent = `服务在线 · ${j.rvc.length} 个模型${j.rvc_ready ? '' : ' · 未找到 RVC Runtime'}`;
+}
+
+/* ---------- 模型目录：打开 / 导入 ---------- */
+$('#openModels').onclick = async () => {
+  try{ const r = await api('/api/models/open', {}); toast('已打开：' + r.path); }
+  catch(e){ toast(e.message, true); }
+};
+$('#importModels').onclick = () => $('#modelFiles').click();
+$('#modelFiles').onchange = async ev => {
+  const files = ev.target.files; if(!files || !files.length) return;
+  const fd = new FormData();
+  for(const f of files) fd.append('files', f);
+  const pth = [...files].find(f => f.name.toLowerCase().endsWith('.pth'));
+  if(!pth) return toast('要选 .pth 模型文件', true);
+  $('#importModels').textContent = '导入中…';
+  try{
+    const r = await fetch('/api/models/import', {method:'POST', body: fd}).then(x => x.json());
+    if(r.error) throw new Error(r.error);
+    toast('已导入 ' + r.saved.length + ' 个文件 → ' + r.dir);
+    await loadModels();
+  }catch(e){ toast(e.message, true); }
+  finally{ $('#importModels').textContent = '⬆ 导入模型'; ev.target.value = ''; }
+};
+
+/* ---------- 第 1 步：分离 ---------- */
+wireDrop($('#d1'), $('#f1'), async f => {
+  const info = await upload(f);
+  S.song = info;
+  $('#p1').innerHTML = pickedHtml(info);
+  $('#run1').disabled = false;
+  $('#hint1').textContent = '准备就绪';
+});
+$('#run1').onclick = async () => {
+  if(!S.song) return;
+  const body = { input: S.song.path, name: S.song.name.replace(/\.[^.]+$/, ''),
+                 model: $('#sepModel').value, fp16: $('#sepFp16').value === '1',
+                 batch: parseInt($('#sepBatch').value) || 2,
+                 purify: $('#sepPurify').value === '1',
+                 strip_backing: $('#sepLead').value === '1',
+                 dereverb: $('#sepDereverb').value === '1',
+                 keep_inst_reverb: parseFloat($('#sepInstRev').value) > 0,
+                 inst_reverb_gain: parseFloat($('#sepInstRev').value) || 1.0,
+                 segment: $('#sepSegment').value || null, overlap: $('#sepOverlap').value || null };
+  $('#run1').disabled = true;
+  const ui = uiOf(1); startUI(ui);
+  try{
+    const j = await api('/api/separate', body);
+    runJob(j.job, Object.assign(ui, {onDone: async res => {
+      const r = res.result || {};
+      S.vocal = r.vocals; S.inst = r.instrumental;
+      if(!S.vocal) return toast('没有拿到分离结果', true);
+      for(const p of [S.vocal, S.inst]){
+        try{ const i = await api('/api/info?p=' + encodeURIComponent(p)); S.durs[p] = i.duration; }catch(_){}
+      }
+      setMedia($('#a1v'), S.vocal); setMedia($('#a1i'), S.inst);
+      $('#d1v').href = dl(S.vocal); $('#d1v').setAttribute('download', baseName(S.vocal));
+      $('#d1i').href = dl(S.inst); $('#d1i').setAttribute('download', baseName(S.inst));
+      $('#out1').hidden = false;
+      $('#run1').disabled = false;
+      $('#run1').textContent = '重新分离';
+      $('#t1').classList.add('done');
+      refreshChips();
+      toast('分离完成，干声与伴奏可各自导出');
+    }}));
+  }catch(e){ $('#run1').disabled = false; toast(e.message, true); }
+};
+
+/* ---------- 第 2 步：转换 ---------- */
+wireDrop($('#d2'), $('#f2'), async f => {
+  const info = await upload(f);
+  S.vocal = info.path; S.durs[info.path] = info.duration || S.durs[info.path];
+  $('#p2').innerHTML = pickedHtml(info);
+  $('#runPrev').disabled = false; $('#run2').disabled = false;
+  $('#hint2').textContent = '准备就绪';
+  const dur = info.duration || 0;
+  $('#start').max = Math.max(1, Math.floor(dur - 5));
+  $('#durHint').textContent = dur ? `（长度 ${fmtT(dur)}）` : '';
+  refreshChips();
+});
+function params(){
+  return { model_id: $('#rvcModel').value, index_mode: $('#indexMode').value,
+           is_half: $('#isHalf').value === '1', pitch: parseInt($('#pitch').value),
+           index_rate: parseFloat($('#indexRate').value), rms_mix_rate: parseFloat($('#rmsMixRate').value),
+           protect: parseFloat($('#protect').value), filter_radius: parseInt($('#filterRadius').value),
+           f0_method: $('#f0Method').value, resample_sr: parseInt($('#resampleSr').value),
+           pre_gain: parseFloat($('#preGain').value),
+           auto_level: parseFloat($('#autoLevel').value),
+           max_segment: parseFloat($('#maxSegment').value),
+           index_k: parseInt($('#indexK').value) };
+}
+/* 每个滑杆旁挂一个数字框：范围和步长跟滑杆一致，打字即可精确输入 */
+function addNumBox(id){
+  const s = $('#'+id); if(!s || $('#num_'+id)) return;
+  const n = document.createElement('input');
+  n.type = 'number'; n.id = 'num_'+id; n.className = 'numbox';
+  n.min = s.min; n.max = s.max; n.step = s.step; n.value = s.value;
+  s.parentElement.appendChild(n);
+  const clamp = v => {
+    let x = parseFloat(v); if(!isFinite(x)) return null;
+    const lo = parseFloat(s.min), hi = parseFloat(s.max);
+    return Math.min(hi, Math.max(lo, x));
+  };
+  n.oninput = () => {
+    const x = clamp(n.value); if(x === null) return;
+    s.value = x; syncLabels(); s.dispatchEvent(new Event('input'));
+  };
+  n.onblur = () => { const x = clamp(n.value); n.value = (x === null ? s.value : x); };
+  s.addEventListener('input', () => { n.value = s.value; });
+}
+['pitch','indexRate','rmsMixRate','protect','filterRadius','preGain','maxSegment','indexK','reverb','revDecay'].forEach(addNumBox);
+function syncLabels(){
+  $('#vPitch').textContent = $('#pitch').value;
+  $('#vIndexRate').textContent = parseFloat($('#indexRate').value).toFixed(2);
+  $('#vRms').textContent = parseFloat($('#rmsMixRate').value).toFixed(2);
+  $('#vProtect').textContent = parseFloat($('#protect').value).toFixed(2);
+  $('#vFilter').textContent = $('#filterRadius').value;
+  $('#vPreGain').textContent = $('#preGain').value;
+  $('#vResample').textContent = $('#resampleSr').value === '0' ? '跟随模型' : $('#resampleSr').value;
+  $('#vSeg').textContent = $('#maxSegment').value + 's';
+  $('#vIdxK').textContent = $('#indexK').value;
+  $('#vRev').textContent = $('#reverb').value + '%';
+  $('#vRevD').textContent = parseFloat($('#revDecay').value).toFixed(1) + 's';
+  /* 预设按钮/程序化改值不会触发 input 事件，这里把数字框同步回来 */
+  ['pitch','indexRate','rmsMixRate','protect','filterRadius','preGain','maxSegment','indexK','reverb','revDecay'].forEach(id => {
+    const s = $('#'+id), n = $('#num_'+id);
+    if (s && n && document.activeElement !== n) n.value = s.value;
+  });
+}
+['pitch','indexRate','rmsMixRate','protect','filterRadius','resampleSr','preGain','maxSegment','indexK','reverb','revDecay'].forEach(id => { $('#'+id).oninput = syncLabels; });
+syncLabels();
+$('#start').oninput = () => { $('#startNum').value = $('#start').value; };
+$('#startNum').oninput = () => { $('#start').value = $('#startNum').value; };
+$('#presetStable').onclick = () => {
+  /* 2026-11-01 第二次验收的旧默认：更像模型音色、更保气声、rmvpe 更顺滑。
+     现在降级为“可选路线”，只在这些情况下比默认预设好：
+     ① 模型的音色本身就是卖点（想更像目标角色）② 气声/耳语/弱混声为主
+     ③ 源录音很轻、峰值还有余量（pre_gain 18 真推得动）④ 长音颤音多、想要更顺的音高轨迹 */
+  $('#sepLead').value = '0'; $('#sepPurify').value = '0'; $('#sepDereverb').value = '1'; $('#sepInstRev').value = '0';
+  $('#indexMode').value = 'auto'; $('#isHalf').value = '1';
+  $('#pitch').value = '0'; $('#indexRate').value = '0.60';
+  $('#rmsMixRate').value = '0.20'; $('#protect').value = '0.47';
+  $('#filterRadius').value = '7'; $('#f0Method').value = 'rmvpe';
+  $('#resampleSr').value = '0'; $('#preGain').value = '18'; $('#autoLevel').value = '0';
+  $('#maxSegment').value = '100'; $('#indexK').value = '10';
+  syncLabels();
+  toast('已套用预设 A（抒情/气声）：index 0.60 / rms 0.20 / protect 0.47 / pre_gain 18 / rmvpe');
+};
+
+$('#presetHard').onclick = () => {
+  /* 2026-11-01「折中硬骨头 B」：用户在多个音源 × 多个模型上复测，听感普遍优于预设一。
+     缘起 song-c（172 BPM 快歌、人声极湿、吐字含糊）：
+     去混响会把整首干声吃掉 → 关掉；降检索保咬字，index_k 拉高补音色，crepe 稳音高。 */
+  $('#sepLead').value = '0'; $('#sepPurify').value = '0'; $('#sepDereverb').value = '1'; $('#sepInstRev').value = '0';
+  $('#indexMode').value = 'auto'; $('#isHalf').value = '1';
+  $('#pitch').value = '0'; $('#indexRate').value = '0.50';
+  $('#rmsMixRate').value = '0.30'; $('#protect').value = '0.40';
+  $('#filterRadius').value = '7'; $('#f0Method').value = 'crepe';
+  $('#resampleSr').value = '0'; $('#preGain').value = '10'; $('#autoLevel').value = '0';
+  $('#maxSegment').value = '100'; $('#indexK').value = '28';
+  syncLabels();
+  toast('已套用硬骨头预设 B：去混响关 + index 0.50 / rms 0.30 / protect 0.40 / crepe / index_k 28 / pre_gain 10 / 单段 100s');
+};
+
+$('#runPrev').onclick = async () => {
+  if(!S.vocal) return toast('先选一个人声文件', true);
+  const body = Object.assign(params(), { vocal: S.vocal, inst: S.inst || null,
+    start: parseFloat($('#startNum').value) || 0, duration: parseFloat($('#prevDur').value) });
+  $('#runPrev').disabled = true;
+  const ui = {bar: $('#barP'), pct: $('#pcP'), phase: $('#phP'), tm: $('#tmP'),
+              log: $('#lgP'), cx: $('#cxP'), box: $('#rbP')};
+  startUI(ui);
+  try{
+    const j = await api('/api/preview', body);
+    runJob(j.job, Object.assign(ui, {onDone: () => {
+      setMedia($('#aP0'), j.clip_rel);
+      setMedia($('#aP1'), j.voice_rel + '?t=' + Date.now());
+      if(j.mix_rel){ setMedia($('#aP2'), j.mix_rel + '?t=' + Date.now()); $('#boxPMix').hidden = false; }
+      else $('#boxPMix').hidden = true;
+      $('#outP').hidden = false;
+      $('#runPrev').disabled = false;
+      $('#t2').classList.add('done');
+      ($('#aP2').src ? $('#aP2') : $('#aP1')).play().catch(() => {});
+    }}));
+  }catch(e){ $('#runPrev').disabled = false; toast(e.message, true); }
+};
+
+$('#run2').onclick = async () => {
+  if(!S.vocal) return toast('先选一个人声文件', true);
+  $('#run2').disabled = true;
+  const ui = uiOf(2); startUI(ui);
+  try{
+    const j = await api('/api/convert', Object.assign(params(), { vocal: S.vocal }));
+    runJob(j.job, Object.assign(ui, {onDone: res => {
+      S.conv = j.out;
+      setMedia($('#a2'), j.out_rel + '?t=' + Date.now());
+      $('#d2out').href = dl(j.out_rel); $('#d2out').setAttribute('download', baseName(j.out));
+      $('#out2').hidden = false;
+      $('#run2').disabled = false; $('#run2').textContent = '再次转换';
+      $('#t2').classList.add('done');
+      refreshChips();
+      const g = (res.result || {}).gain;
+      toast('转换完成' + (g ? `（响度对齐 ${g} dB）` : ''));
+    }}));
+  }catch(e){ $('#run2').disabled = false; toast(e.message, true); }
+};
+
+/* ---------- 第 3 步：合成 ---------- */
+wireDrop($('#d3v'), $('#f3v'), async f => {
+  const info = await upload(f);
+  S.vocal = info.path; $('#p3v').innerHTML = pickedHtml(info); refresh3();
+});
+wireDrop($('#d3i'), $('#f3i'), async f => {
+  const info = await upload(f);
+  S.inst = info.path; $('#p3i').innerHTML = pickedHtml(info); refresh3();
+});
+function refresh3(){
+  $('#run3').disabled = !(S.vocal && S.inst);
+  if(S.vocal) $('#p3v').innerHTML = pickedHtml({name: baseName(S.vocal), path: S.vocal, duration: S.durs[S.vocal] || 0});
+  if(S.inst) $('#p3i').innerHTML = pickedHtml({name: baseName(S.inst), path: S.inst, duration: S.durs[S.inst] || 0});
+  $('#hint3') && ($('#hint3').textContent = '');
+}
+$('#run3').onclick = async () => {
+  if(!(S.vocal && S.inst)) return toast('两条音轨都要有', true);
+  const body = { vocal: S.vocal, inst: S.inst,
+                 vocal_gain: parseFloat($('#vocalGain').value) || 0,
+                 instrumental_gain: parseFloat($('#instGain').value) || 0,
+                 reverb: parseFloat($('#reverb').value) || 0,
+                 reverb_decay: parseFloat($('#revDecay').value) || 1.8,
+                 format: $('#fmt').value, limiter: $('#limiter').value === '1',
+                 name: $('#outName').value.trim() || null };
+  $('#run3').disabled = true;
+  const ui = uiOf(3); startUI(ui);
+  try{
+    const j = await api('/api/mix', body);
+    runJob(j.job, Object.assign(ui, {onDone: () => {
+      S.mixed = j.out;
+      setMedia($('#a3'), j.out_rel + '?t=' + Date.now());
+      $('#d3out').href = dl(j.out_rel); $('#d3out').setAttribute('download', baseName(j.out));
+      $('#out3').hidden = false; $('#run3').disabled = false;
+      $('#t3').classList.add('done');
+      toast('成品已生成：' + baseName(j.out));
+      $('#a3').play().catch(() => {});
+    }}));
+  }catch(e){ $('#run3').disabled = false; toast(e.message, true); }
+};
+
+/* ---------- 通用：音轨 / 导出 / 跳转 ---------- */
+function setMedia(el, p){ if(p) el.src = '/media?p=' + encodeURIComponent(String(p).replace(/\\/g,'/')) + (String(p).includes('?') ? '' : '&t=' + Date.now()); }
+function dl(p){ return '/media?p=' + encodeURIComponent(String(p).replace(/\\/g,'/')) + '&dl=1'; }
+function baseName(p){ return String(p).replace(/\\/g,'/').split('/').pop(); }
+function refreshChips(){
+  const c1 = $('#chips1'); c1.innerHTML = (S.vocal && S.inst)
+    ? `<span class="chip" data-jump="2">用刚才的干声去转换 →</span><span class="chip" data-jump="3">直接去合成 →</span>` : '';
+  const c2 = $('#chips2');
+  const items = [];
+  if(S.vocal) items.push(`<span class="chip" data-use="vocal">使用第 1 步的干声</span>`);
+  if(S.inst) items.push(`<span class="chip" data-use="inst">伴奏已就绪</span>`);
+  c2.innerHTML = items.join('');
+  const c3 = $('#chips3');
+  const it3 = [];
+  if(S.conv) it3.push(`<span class="chip" data-use="conv">用人声：${baseName(S.conv)}</span>`);
+  if(S.inst) it3.push(`<span class="chip" data-use="inst">用伴奏：${baseName(S.inst)}</span>`);
+  if(S.vocal) it3.push(`<span class="chip" data-use="vocal">用干声：${baseName(S.vocal)}</span>`);
+  c3.innerHTML = it3.join('');
+}
+document.addEventListener('click', e => {
+  const jump = e.target.closest('[data-jump]');
+  if(jump){ setTab(jump.dataset.jump); return; }
+  const use = e.target.closest('[data-use]');
+  if(use){
+    const kind = use.dataset.use;
+    if(kind === 'vocal'){ if(!S.vocal) return; setTab(2); S.vocal = S.vocal; $('#p2').innerHTML = pickedHtml({name: baseName(S.vocal), path: S.vocal, duration: S.durs[S.vocal]||0}); $('#runPrev').disabled = false; $('#run2').disabled = false; refreshChips(); }
+    if(kind === 'inst'){ if(!S.inst) return; setTab(3); $('#p3i').innerHTML = pickedHtml({name: baseName(S.inst), path: S.inst, duration: S.durs[S.inst]||0}); refresh3(); }
+    if(kind === 'conv'){ if(!S.conv) return; setTab(3); S.vocal = S.conv; $('#p3v').innerHTML = pickedHtml({name: baseName(S.conv), path: S.conv, duration: S.durs[S.conv]||0}); refresh3(); }
+    refreshChips();
+    return;
+  }
+  const open = e.target.closest('[data-open]');
+  if(open){
+    e.preventDefault();
+    const box = open.closest('.box');
+    const src = box ? box.querySelector('audio') : null;
+    const p = src && src.src ? decodeURIComponent(src.src.split('p=')[1] || '').split('&')[0] : '';
+    if(p) fetch('/api/open?p=' + encodeURIComponent(p));
+    else toast('先跑一次任务，再打开文件夹', true);
+  }
+});
+
+loadModels().catch(e => { $('#healthTxt').textContent = '服务未响应'; toast(e.message, true); });
+</script>
+</body>
+</html>

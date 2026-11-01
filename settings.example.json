@@ -1,0 +1,10 @@
+{
+  "rvc_python": "E:/RVC/runtime/python.exe",
+  "ffmpeg": "C:/tools/ffmpeg/bin/ffmpeg.exe",
+  "rvc_core": "D:/AI/CoverStudio/rvc_core",
+  "sep_model_dir": "D:/AI/CoverStudio/models/mdxc",
+  "model_roots": [
+    {"path": "D:/AI/CoverStudio/rvc_models", "label": "本地模型", "writable": true},
+    {"path": "E:/RVC/User_Data/models", "label": "RVC runtime（只读）", "writable": false}
+  ]
+}

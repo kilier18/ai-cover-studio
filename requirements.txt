@@ -1,0 +1,15 @@
+# torch 需要单独的 CUDA 索引，见 DEPLOY.md 第 2 步：
+#   pip install torch==2.4.1+cu121 torchaudio==2.4.1+cu121 --index-url https://download.pytorch.org/whl/cu121
+torch==2.4.1+cu121
+torchaudio==2.4.1+cu121
+
+# 人声分离（BS-Roformer / Mel-Band RoFormer / 去混响 / 去和声）
+audio-separator==0.48.0
+
+# 网页界面
+flask>=3.1
+
+# 音频处理
+librosa>=0.11
+soundfile>=0.12
+numpy>=1.26
