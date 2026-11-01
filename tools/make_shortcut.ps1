@@ -1,52 +1,22 @@
-﻿# Desktop shortcuts for the AI cover studio (UTF-8 with BOM required).
-
+﻿# 在桌面创建「启动 / 停止」快捷方式（PowerShell 5.1，脚本需保存为 UTF-8 with BOM）
 $ErrorActionPreference = 'Stop'
 
-$root = '<REPO>'
-
-$pyw  = '<REPO>/py311/pythonw.exe'
-
-$app  = '<REPO>/tools/webui/app.py'
-
+$root = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
 $desktop = [Environment]::GetFolderPath('Desktop')
-
 $ws = New-Object -ComObject WScript.Shell
 
-
-
-$lnk = $ws.CreateShortcut((Join-Path $desktop 'AI 翻唱工坊.lnk'))
-
-$lnk.TargetPath = $pyw
-
-$lnk.Arguments = '"' + $app + '" --port 8765 --open'
-
+$lnk = $ws.CreateShortcut((Join-Path $desktop 'AI Cover Studio.lnk'))
+$lnk.TargetPath = Join-Path $root 'start.bat'
 $lnk.WorkingDirectory = $root
-
-$lnk.IconLocation = "$pyw,0"
-
-$lnk.Description = 'AI 翻唱工坊：分离 → 转换 → 合成'
-
+$lnk.Description = 'AI Cover Studio: separate -> convert -> mix'
 $lnk.WindowStyle = 7
-
 $lnk.Save()
 
-
-
-$lnk2 = $ws.CreateShortcut((Join-Path $desktop 'AI 翻唱工坊（停止）.lnk'))
-
-$lnk2.TargetPath = '<REPO>/停止AI翻唱工坊.bat'
-
+$lnk2 = $ws.CreateShortcut((Join-Path $desktop 'AI Cover Studio (stop).lnk'))
+$lnk2.TargetPath = Join-Path $root 'stop.bat'
 $lnk2.WorkingDirectory = $root
-
-$lnk2.IconLocation = "$pyw,0"
-
-$lnk2.Description = '停止 AI 翻唱工坊本地服务'
-
+$lnk2.Description = 'Stop the local AI Cover Studio service'
 $lnk2.WindowStyle = 7
-
 $lnk2.Save()
 
-
-
-Write-Output ('ARGS ' + $lnk.Arguments)
-
+Write-Output ('shortcuts created in ' + $desktop)
