@@ -51,6 +51,8 @@
 详见 [DEPLOY.md](DEPLOY.md)。三步：
 
 ```bat
+:: 0. 自检（缺 torch/ffmpeg/RVC 内核/模型会逐条列出来）
+python tools\check_env.py
 :: 1. 装 Python 依赖（见 DEPLOY.md）
 :: 2. 编辑 settings.json 指向你的 RVC runtime / ffmpeg / 模型目录
 :: 3. 双击
@@ -68,6 +70,7 @@ start.bat
 ├── requirements.txt
 ├── tools/
 │   ├── settings.py             所有外部路径的唯一来源
+│   ├── check_env.py            环境自检（依赖 / GPU / ffmpeg / RVC 内核 / 模型）
 │   ├── separate.py             ① 分离（含去和声 / 去混响 / 回填混响）
 │   ├── rvc_convert.py          ② RVC 变声（隔离内核副本）
 │   ├── mix.py                  ③ 混音

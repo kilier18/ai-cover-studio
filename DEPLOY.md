@@ -167,6 +167,12 @@ rvc_models\
 
 ## 7. 启动
 
+先自检一遍（缺什么会 [MISS] 逐条列出来，全 ok 再启动）：
+
+```bat
+python tools\check_env.py
+```
+
 双击 `start.bat`（后台 `pythonw` 启动，关掉黑窗口服务不会死），浏览器打开
 <http://127.0.0.1:8765>。
 

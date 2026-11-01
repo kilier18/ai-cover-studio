@@ -57,8 +57,11 @@ def get(key: str, default=None):
 
 
 def rvc_python() -> Path | None:
-    p = Path(str(SETTINGS.get("rvc_python") or ""))
-    return p if str(p) and p.exists() else None
+    raw = str(SETTINGS.get("rvc_python") or "").strip()
+    if not raw:
+        return None
+    p = Path(raw)
+    return p if p.exists() else None
 
 
 def ffmpeg() -> Path | None:
