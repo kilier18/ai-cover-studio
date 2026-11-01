@@ -46,6 +46,14 @@
 4. **f0 指标（跳音率、八度错误）和听感基本无关**，别用它判断音质，用耳朵。
 5. `filter_radius` 这版内核**只对 harvest 生效**（`pipeline.py` 里 `medfilt` 只在 harvest 分支），crepe/rmvpe 下改了没效果。
 
+## 文档导航
+
+| 你是谁 | 先看 |
+|---|---|
+| 第一次装 | [DEPLOY.md](DEPLOY.md) —— 全新电脑从零，10 步 + 报错表 |
+| 想调出好效果 | [docs/PARAMETERS.md](docs/PARAMETERS.md) —— 每个参数到底影响什么、哪些内核不支持 |
+| 接手维护 | [MAINTAINER.md](MAINTAINER.md) —— 文件地图、三种常见改动、内核契约、发布流程 |
+
 ## 快速开始
 
 详见 [DEPLOY.md](DEPLOY.md)。三步：
@@ -65,9 +73,12 @@ start.bat
 
 ```
 .
+├── MAINTAINER.md               维护者手册（改参数 / 加步骤 / 发布）
 ├── start.bat / stop.bat        启动、停止（后台 pythonw，关掉窗口不会杀服务）
 ├── settings.example.json       复制成 settings.json 后改路径，代码不用动
 ├── requirements.txt
+├── DEPLOY.md                   全新电脑从零部署（10 步 + 报错表）
+├── docs/                       PARAMETERS.md（参数全表）、flow.txt（流程示意）
 ├── tools/
 │   ├── settings.py             所有外部路径的唯一来源
 │   ├── check_env.py            环境自检（依赖 / GPU / ffmpeg / RVC 内核 / 模型）
