@@ -230,3 +230,37 @@ python tools\pipeline.py "song.mp3" --model-dir rvc_models\my-model --model my-m
 | 混音 | 2~4 秒 |
 
 显存吃紧就调小「单段推理时长」（65 s 是内核原值，最省显存也最块；调大更连贯但耗时按平方增长）。
+---
+
+## 11. 完全自包含布局（推荐，作者机器就是这样跑的）
+
+不用把任何东西留在别的 RVC 安装目录里。所有依赖都拷到本项目根目录下，删掉外部安装也照样能跑：
+
+```
+<仓库根>/
+  py311/                  Python 3.11（embeddable 版 + pip）
+  rvc_core/               RVC 内核明文代码（infer/ configs/ assets/）
+  rvc_runtime/            Python 3.9 + torch 2.0.0+cu118（从 RVC 整合包的 runtime/ 整个拷过来）
+  bin/ffmpeg.exe          ffmpeg 与 ffprobe
+  models/mdxc/            分离 / 去混响 / 去和声的 .ckpt
+  rvc_models/             自己的 .pth + .index（一个角色一个文件夹）
+  work/                   所有中间产物
+  settings.json           唯一要改的配置
+```
+
+对应的 `settings.json`：
+
+```json
+{
+  "rvc_python": "<仓库根>/rvc_runtime/python.exe",
+  "ffmpeg": "<仓库根>/bin/ffmpeg.exe",
+  "rvc_core": "<仓库根>/rvc_core",
+  "sep_model_dir": "<仓库根>/models/mdxc",
+  "model_roots": [
+    {"path": "<仓库根>/rvc_models", "label": "本地模型", "writable": true}
+  ]
+}
+```
+
+这样跑起来后 `grep -r "变声器rvc\|RVCMAX"` 在整个项目里应该一条都搜不到；
+网页服务、命令行、三阶段流水线全都只认这一个根目录。
