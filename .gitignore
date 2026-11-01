@@ -18,3 +18,5 @@ tmp/
 Thumbs.db
 desktop.ini
 .DS_Store
+# 个人推送脚本，不属于仓库内容
+publish.bat
