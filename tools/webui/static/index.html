@@ -419,17 +419,17 @@
         </div>
         <div class="field">
           <label>亮度 EQ <span class="tip" data-tip="高频架子（8kHz 以上）。比原唱亮太多就往下拉 2~4 dB，暗太多就加 2~3 dB。PitchIn-Q 诊断出的 brightness 偏差可以直接在这里补偿。">?</span></label>
-          <input type="range" id="eqAir" min="-6" max="6" step="0.5" value="0">
+          <input type="range" id="eqAir" min="-6" max="6" step="0.1" value="0">
           <span class="val" id="vEqAir">0dB</span>
         </div>
         <div class="field">
           <label>靠前度 <span class="tip" data-tip="3kHz 附近的峰值，管人声“贴不贴脸”。被伴奏压住就加 1~3 dB，太冲就往回收。">?</span></label>
-          <input type="range" id="eqPres" min="-6" max="6" step="0.5" value="0">
+          <input type="range" id="eqPres" min="-6" max="6" step="0.1" value="0">
           <span class="val" id="vEqPres">0dB</span>
         </div>
         <div class="field">
           <label>厚度 <span class="tip" data-tip="180Hz 低架。声音单薄就加 2~3 dB，浑浊/轰头就减。">?</span></label>
-          <input type="range" id="eqBody" min="-6" max="6" step="0.5" value="0">
+          <input type="range" id="eqBody" min="-6" max="6" step="0.1" value="0">
           <span class="val" id="vEqBody">0dB</span>
         </div>
         <div class="field">
@@ -443,6 +443,11 @@
           <input type="text" id="outName" placeholder="留空自动命名" style="width:180px">
         </div>
         <button class="primary" id="run3" disabled>合成成品</button>
+      </div>
+      <div style="margin-top:12px;display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+        <button class="ghost small" id="diagRun" disabled>诊断这一步（PitchIn-Q）</button>
+        <button class="ghost small" id="diagApply" disabled>按建议重填 EQ</button>
+        <span class="hint" id="diagNote">转换完成后会自动量一遍音色亮度，并把 EQ 直接填好。</span>
       </div>
       <div class="runbar" id="rb3" hidden>
         <div class="bar"><i id="bar3"></i></div>
@@ -770,10 +775,79 @@ $('#run1').onclick = async () => {
       $('#run1').textContent = '重新分离';
       $('#t1').classList.add('done');
       refreshChips();
+      autoReverb();
       toast('分离完成，干声与伴奏可各自导出');
     }}));
   }catch(e){ $('#run1').disabled = false; toast(e.message, true); }
 };
+
+/* ---------- 第③步：PitchIn-Q 自动填参 ---------- */
+const REV_BY_CLEAN = { none: 6, backing: 8, dereverb: 12, both: 14 };
+const DIAG_TO_ID = { eq_air: 'eqAir', eq_presence: 'eqPres', eq_body: 'eqBody' };
+let LAST_DIAG = null;
+
+function setSlider(id, v){
+  const el = $('#' + id); if(!el) return;
+  const lo = parseFloat(el.min), hi = parseFloat(el.max);
+  el.value = Math.min(hi, Math.max(lo, Number(v) || 0));
+  el.dispatchEvent(new Event('input'));
+}
+
+/* 第①步的处理方式决定混响起步值：剥过混响/和声的人声更干，需要多补一点空间 */
+function autoReverb(){
+  if(S.revTouched) return;
+  const wet = REV_BY_CLEAN[$('#sepClean').value];
+  if(wet == null) return;
+  setSlider('reverb', wet);
+}
+
+function applyDiag(rep){
+  if(!rep || !rep.summary) return null;
+  const plan = (rep.param_plan || []).filter(p => p.stage === 'mix');
+  const filled = [];
+  for(const p of plan){
+    const id = DIAG_TO_ID[p.param];
+    if(!id) continue;
+    setSlider(id, p.to);
+    filled.push(`${p.param} ${Number(p.to).toFixed(1)}dB`);
+  }
+  const sm = rep.summary;
+  const dir = sm.timbre === 'bright' ? '偏亮' : sm.timbre === 'dark' ? '偏暗' : '接近原唱';
+  const txt = `诊断：质心 ${Math.round(sm.centroid_src_hz)} → ${Math.round(sm.centroid_conv_hz)} Hz`
+    + `（${Number(sm.centroid_delta_st).toFixed(1)} 半音 · ${dir}）`
+    + (filled.length ? ` → 已填 ${filled.join(' / ')}` : ' → 无需改 EQ');
+  const note = $('#diagNote');
+  if(note) note.textContent = txt;
+  $('#diagApply').disabled = !filled.length;
+  syncLabels();
+  return rep;
+}
+
+async function runDiag(maxSeconds){
+  if(!(S.vocal && S.conv)) { $('#diagRun').disabled = !(S.vocal && S.conv); return; }
+  $('#diagRun').disabled = true;
+  const note = $('#diagNote');
+  if(note) note.textContent = '诊断中…（零显存，约 10~30 秒）';
+  try{
+    const j = await api('/api/diagnose', { source: S.vocal, converted: S.conv,
+                                           lock_mode: 'auto', max_seconds: maxSeconds || 90 });
+    for(let i = 0; i < 120; i++){
+      await new Promise(r => setTimeout(r, 1500));
+      const s = await api('/api/diagnose/' + j.job);
+      if(s.status === 'error'){ if(note) note.textContent = '诊断失败：' + (s.error || '未知错误'); break; }
+      if(s.status === 'done'){
+        LAST_DIAG = s.report || null;
+        applyDiag(LAST_DIAG);
+        if(LAST_DIAG) toast('已按诊断填入第③步：' + ((LAST_DIAG.summary || {}).timbre || ''));
+        break;
+      }
+    }
+  }catch(e){
+    if(note) note.textContent = '诊断失败：' + e.message;
+  }finally{
+    $('#diagRun').disabled = !(S.vocal && S.conv);
+  }
+}
 
 /* ---------- 第 2 步：转换 ---------- */
 wireDrop($('#d2'), $('#f2'), async f => {
@@ -923,6 +997,8 @@ $('#run2').onclick = async () => {
       refreshChips();
       const g = (res.result || {}).gain;
       toast('转换完成' + (g ? `（响度对齐 ${g} dB）` : ''));
+      if($('#diagRun')) $('#diagRun').disabled = false;
+      setTimeout(() => runDiag(90), 400);
     }}));
   }catch(e){ $('#run2').disabled = false; toast(e.message, true); }
 };
@@ -938,10 +1014,15 @@ wireDrop($('#d3i'), $('#f3i'), async f => {
 });
 function refresh3(){
   $('#run3').disabled = !(S.vocal && S.inst);
+  if($('#diagRun')) $('#diagRun').disabled = !(S.vocal && S.conv);
   if(S.vocal) $('#p3v').innerHTML = pickedHtml({name: baseName(S.vocal), path: S.vocal, duration: S.durs[S.vocal] || 0});
   if(S.inst) $('#p3i').innerHTML = pickedHtml({name: baseName(S.inst), path: S.inst, duration: S.durs[S.inst] || 0});
   $('#hint3') && ($('#hint3').textContent = '');
 }
+$('#diagRun').onclick = () => runDiag(0);
+$('#diagApply').onclick = () => { if(LAST_DIAG) applyDiag(LAST_DIAG); };
+['pointerdown','keydown','wheel'].forEach(ev => $('#reverb').addEventListener(ev, () => { S.revTouched = true; }, {passive:true}));
+
 $('#run3').onclick = async () => {
   if(!(S.vocal && S.inst)) return toast('两条音轨都要有', true);
   const body = { vocal: S.vocal, inst: S.inst,

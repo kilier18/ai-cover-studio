@@ -263,3 +263,26 @@ UI 上 `eq_air` ↔ `#eqAir`、`eq_presence` ↔ `#eqPres`，直接照着填即�
 | 厚度 | `--eq-body` | ±6 dB | 180 Hz 低架 |
 | 混响 | `--reverb` / `--reverb-decay` / `--reverb-predelay` / `--reverb-damp` | 0–80% / 0.3–6 s / 0–100 ms / 2–16 kHz | 只加在转换后的人声上 |
 | 母带匹配 | `--matcher`（HTTP 侧：`matcher.enabled` + `matcher.reference`） | — | Matchering 对齐参考曲的响度与频响 |
+
+## 11. 亮度问题的标定结论（2026-11-02 实测）
+
+同一段 20s 干声（频谱质心 **2530 Hz**），固定其它参数、只改一个 RVC 参数，量输出质心：
+
+| 参数 | 取值 | 质心 | Δ相对原唱 |
+|---|---|---|---|
+| index_rate | 0.20 / 0.50 / 0.80 | 1751 / 1755 / 1730 Hz | −6.37 / −6.33 / −6.58 半音 |
+| protect | 0.20 / 0.45 | 1759 / 1759 Hz | −6.30 / −6.29 半音 |
+| filter_radius | 0 / 7 | 1760 / 1758 Hz | −6.29 / −6.30 半音 |
+| rms_mix_rate | 0.0 / 1.0 | 1763 / 1749 Hz | −6.26 / −6.39 半音 |
+
+- **RVC 侧这四个参数对质心的影响都 < 0.2 半音**，不能用来修亮度（早期建议「偏亮降 index_rate」已删除）。
+- 亮度差的主因是**音色模型本身**（本例该模型固定偏暗 6.3 半音），根本解是换质心更接近原唱的模型。
+- 导出侧的 EQ 才是有效杠杆：`eq_air +2.5 dB` 把 1754 Hz 拉到 2373 Hz（≈ +4.4 半音），再过 Matchering 保持 2351 Hz。
+- 因此 `param_plan` 里亮度相关条目固定为：`model`（stage=rvc，换模型，置信 0.8）+ `eq_air`（stage=mix，置信 0.75）+ `eq_presence`（stage=mix，取 air 的一半，0.6）。
+
+## 12. 第 3 步的自动填参
+
+- 转换 `onDone` 后 400 ms 自动跑一次诊断（`max_seconds=90`），结果写进第 3 步滑杆：`eq_air` → `#eqAir`、`eq_presence` → `#eqPres`、`eq_body` → `#eqBody`（步进 0.1 dB）。
+- 第 1 步分离 `onDone` 时按 `clean` 选项预填混响量：`none` 6% / `backing` 8% / `dereverb` 12% / `both` 14%；用户手动动过混响滑杆就不再覆盖（`S.revTouched`）。
+- 第 3 步按钮：`诊断这一步`（手动重跑）、`按建议重填`（重放上一次报告）、右侧提示行显示「质心 2530 → 1729 Hz（−6.6 半音 · 偏暗）→ 已填 …」。
+- 诊断不阻塞转换：`/api/diagnose` 用独立 job，`lock_mode=auto` 在显存够用时不吃 gpulock，可与 RVC 并发。

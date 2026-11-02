@@ -415,7 +415,7 @@ def analyze(src: np.ndarray, conv: np.ndarray, params: dict, f0_method: str = "y
                     for s in sorted(segments, key=lambda s: -SEVERITY_W.get(s["severity"], 2))[:3]],
         },
         "segments": segments,
-        "param_plan": build_plan(segments, params, mean_cents),
+        "param_plan": build_plan(segments, params, mean_cents, cen_st),
         "inputs_params": params,
     }
 
@@ -438,7 +438,8 @@ def _clamp(name: str, val: float) -> float:
     return float(max(lo, min(hi, v)))
 
 
-def build_plan(segments: list[dict], params: dict, mean_cents: float) -> list[dict]:
+def build_plan(segments: list[dict], params: dict, mean_cents: float,
+               timbre_st: float = 0.0) -> list[dict]:
     base = dict(DEFAULTS)
     base.update({k: v for k, v in (params or {}).items() if k in DEFAULTS})
     plan: dict[str, dict] = {}
@@ -498,24 +499,34 @@ def build_plan(segments: list[dict], params: dict, mean_cents: float) -> list[di
                           "why": (f"比原唱亮，导出时把 8 kHz 以上压 {sign * mag:+.1f} dB，收掉亮边和齿音"
                                   if bright else
                                   f"比原唱暗，导出时把 8 kHz 以上加 {mag:+.1f} dB，补回空气感"),
-                          "confidence": 0.7}
+                          "confidence": 0.75}
         plan["eq_presence"] = {"param": "eq_presence", "stage": "mix", "from": 0.0,
                                "to": round(sign * (mag / 2.0), 1),
                                "why": "3 kHz 靠前度跟着亮度回调一半，避免只改高频、音色出现断层",
                                "confidence": 0.55}
-        if bright:
-            add("filter_radius", 1, "偏亮常伴随齿音/金属音，加大滤波半径", 0.5)
-            add("index_rate", -0.05, "降一点检索，音色少一点模型味（模型通常偏亮）", 0.45)
-        else:
-            add("index_rate", 0.06, "偏暗时提高检索，从音色库补回高频与细节", 0.5)
-            add("protect", 0.03, "提高保护，减少过度平滑导致的发闷", 0.4)
+        # 2026-11-02 标定：index_rate / protect / filter_radius / rms_mix_rate 对质心的
+        # 影响都 < 0.2 半音（实测 1751/1755/1730 Hz、1759 Hz、1758/1760 Hz、1763/1749 Hz），
+        # 所以亮度问题不能靠 RVC 参数修，只能换模型或走导出 EQ。
+        plan["model"] = {"param": "model", "stage": "rvc", "from": base.get("model", "当前音色模型"),
+                         "to": "换成频谱质心更接近原唱的音色模型（否则用 EQ 补偿）",
+                         "why": (f"{abs(timbre_st):.1f} 半音的亮度差主要来自模型本身的音色；"
+                                 "实测 index_rate/protect/filter_radius/rms_mix_rate 对质心影响 <0.2 半音"),
+                         "confidence": 0.8}
     if "level_jump" in kinds:
         cur = float(base.get("rms_mix_rate", 0.3))
         add("rms_mix_rate", -0.1 if cur >= 0.3 else 0.1,
             "音量包络和源干声差得多，调包络混合比", 0.5)
 
-    out = [v for k, v in plan.items() if k != "source_note"
-           and not (v.get("param") != "f0_method" and float(v["from"]) == float(v["to"]))]
+    out = []
+    for k, v in plan.items():
+        if k == "source_note":
+            continue
+        try:
+            if v.get("param") not in ("f0_method", "model") and float(v["from"]) == float(v["to"]):
+                continue
+        except (TypeError, ValueError):
+            pass          # 非数值型（model 这类文本建议）保留
+        out.append(v)
     for v in out:
         v.setdefault("stage", "rvc")
     note = plan.get("source_note")
