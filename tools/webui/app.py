@@ -15,6 +15,7 @@ import shutil
 import subprocess
 import sys
 import threading
+from contextlib import nullcontext
 import time
 import uuid
 import webbrowser
@@ -172,7 +173,15 @@ def finish(jid: str, result=None, error=None, canceled: bool = False) -> None:
 
 
 def run_job(jid: str, steps: list[dict]) -> None:
-    """跑一个作业：先拿跨进程显存锁（RVC 与 PitchIn-Q 互斥），再跑命令。"""
+    """跑一个作业：默认先拿跨进程显存锁（RVC 与 PitchIn-Q 互斥），再跑命令。
+
+    job 里设 gpu="auto"/"none" 时不吃锁也不吃进程内信号量，交给 pitchinq 自己按显存余量决定。
+    """
+    with JOBS_LOCK:
+        mode = JOBS.get(jid, {}).get("gpu", "lock")
+    if mode in ("auto", "none"):
+        _run_job_inner(jid, steps, use_sem=False)
+        return
     lock = None
     try:
         lock = gpulock.hold(f"webui:{jid}", timeout=float(os.environ.get("GPULOCK_WAIT", "0") or 0))
@@ -186,8 +195,9 @@ def run_job(jid: str, steps: list[dict]) -> None:
         lock.release()
 
 
-def _run_job_inner(jid: str, steps: list[dict]) -> None:
-    with GPU:
+def _run_job_inner(jid: str, steps: list[dict], use_sem: bool = True) -> None:
+    # 诊断作业可以不吃进程内信号量（use_sem=False），是否真的并发由 pitchinq 的 --lock-mode 决定
+    with (GPU if use_sem else nullcontext()):
         with JOBS_LOCK:
             if JOBS[jid]["cancel"]:
                 finish(jid, canceled=True)
@@ -711,16 +721,22 @@ def api_diagnose():
     diag.mkdir(parents=True, exist_ok=True)
     jid = new_job(f"诊断 · {src.stem} vs {conv.stem}", ["PitchIn-Q 诊断"], reveal=str(diag))
     out = diag / f"{jid}.json"
+    lock_mode = str(data.get("lock_mode") or "auto").lower()
+    if lock_mode not in ("auto", "wait", "none"):
+        lock_mode = "auto"
     cmd = [sys.executable, str(TOOLS / "pitchinq.py"),
            "--source", str(src), "--converted", str(conv), "--out", str(out),
+           "--lock-mode", lock_mode,
            "--wait-gpu", str(float(data.get("wait_gpu") or 300))]
     params = data.get("params")
     if isinstance(params, dict) and params:
         pfile = diag / f"{jid}.params.json"
         pfile.write_text(json.dumps(params, ensure_ascii=False), encoding="utf-8")
         cmd += ["--params", str(pfile)]
+    with JOBS_LOCK:
+        JOBS[jid]["gpu"] = "none" if lock_mode == "none" else "auto"
     start(jid, [{"cmd": cmd, "capture": {}}])
-    return jsonify({"job": jid, "report": str(out), "report_rel": rel(out)})
+    return jsonify({"job": jid, "report": str(out), "report_rel": rel(out), "lock_mode": lock_mode})
 
 
 @app.get("/api/diagnose/<jid>")
