@@ -145,7 +145,7 @@
           <select id="sepFp16"><option value="1" selected>fp16（快）</option><option value="0">fp32（稳）</option></select>
         </div>
         <div class="field">
-          <label>人声清理 <span class="tip" data-tip="去和声＝把和声/双轨叠唱单独剥掉再转换（多了第二次模型推理，整首耗时约翻倍）。实测：同一首 5:53 的歌，普通分离有人声八度跳变 21 处、去和声后只剩 1 处，评分 79→88，所以默认开。去混响＝录音湿、拖尾回声重时用，再叠一次推理。只做分离最快；两样都做最干净，但气声会略薄。">?</span></label>
+          <label>人声清理 <span class="tip" data-tip="去和声＝把和声/双轨叠唱单独剥掉再转换（多了第二次模型推理，整首耗时约翻倍）。实测：同一首 5:53 的歌，普通分离有人声八度跳变 21 处、去和声后只剩 1 处，评分 79→88，所以默认开。去混响＝录音湿、拖尾回声重时用，再叠一次推理。只做分离最快；两样都做最干净，但气声会略薄。抒情/耳语/气声为主的歌选「只做分离」，否则呼吸声也会被削掉。">?</span></label>
           <select id="sepClean">
             <option value="none">只做分离（最快）</option>
             <option value="backing" selected>去和声（推荐 · 和声/双轨重时）</option>
@@ -208,8 +208,8 @@
 
     <div class="card">
       <h2><span class="n">⚙</span>模型与参数
-        <button class="link" id="presetStable" style="margin-left:auto">预设 A · 抒情/气声（更像模型）</button>
-        <button class="link" id="presetHard">★ 默认 · 硬骨头 B（推荐）</button>
+        <button class="link" id="presetStable" style="margin-left:auto" data-tip="抒情/气声路线：不清理人声（保气声）＋ index 0.60 / rms 0.20 / protect 0.47（更像模型本人）＋ crepe 音高 ＋ pre_gain 18（救轻唱）＋ 14% 混响。慢歌、耳语、模型音色本身是卖点的曲子用这套。">预设 A · 抒情/气声（更像模型）</button>
+        <button class="link" id="presetHard" data-tip="默认推荐：去和声 ＋ index 0.50 / rms 0.30 / protect 0.40 / crepe / index_k 28 / pre_gain 10 ＋ 8% 混响 ＋ MP3 320k。流行、快歌、和声多、吐字含糊的歌首选。">★ 默认 · 硬骨头 B（推荐）</button>
       </h2>
       <div class="row" style="align-items:flex-end">
         <div class="field" style="flex:1;min-width:300px">
@@ -225,33 +225,33 @@
           </div>
         </div>
         <div class="field">
-          <label>检索索引 <span class="tip" data-tip="自动=用模型自带的 .index 做音色检索；关掉更快但音色相似度下降。">?</span></label>
+          <label>检索索引 <span class="tip" data-tip="自动=用模型自带的 .index 做音色检索，搜得越准越像；关掉更快，但相似度下降。索引缺失会自动跳过，不报错。">?</span></label>
           <select id="indexMode"><option value="auto" selected>自动</option><option value="none">不使用</option></select>
         </div>
         <div class="field">
-          <label>精度 <span class="tip" data-tip="半精度更快；若出现电流声/杂音可切全精度。">?</span></label>
+          <label>精度 <span class="tip" data-tip="fp16 更快更省显存；出现细碎嘶声/电流声再切 fp32（显存约翻倍）。">?</span></label>
           <select id="isHalf"><option value="1" selected>fp16</option><option value="0">fp32</option></select>
         </div>
       </div>
       <div class="grid" style="margin-top:14px">
         <div class="ctl">
-          <div class="top"><span>音高 pitch <span class="tip" data-tip="整体升降调（半音）。同性别唱 0；男声唱女声 +12；女声唱男声 −12。原唱是女声、模型也是女声就保持 0。">?</span></span><span class="val" id="vPitch">0</span></div>
+          <div class="top"><span>音高 pitch <span class="tip" data-tip="整体升降调（半音）：同性别 0，男唱女 +12，女唱男 −12。觉得成品「声调偏高」别先动这里——本工具实测音高中位偏差只有 +1.6 音分，听着偏高多半是模型的共振峰更靠上，用第 3 步「校正到原唱音色」解决；这里改 −1 是真的唱低 100 音分、整首跑调。">?</span></span><span class="val" id="vPitch">0</span></div>
           <input type="range" id="pitch" min="-24" max="24" step="1" value="0">
         </div>
         <div class="ctl">
-          <div class="top"><span>检索比例 index_rate <span class="tip" data-tip="越高越贴近目标音色，过高会出现金属感/毛刺、高音更容易破。常用 0.4~0.6。">?</span></span><span class="val" id="vIndexRate">0.50</span></div>
+          <div class="top"><span>检索比例 index_rate <span class="tip" data-tip="越高越贴目标音色，常用 0.4~0.6；>0.8 会金属感、齿音发毛、高音容易破。实测 0.2/0.5/0.8 的频谱质心只差 0.2 个半音 → 它调不了音色亮度，别拿它修「太亮/太暗」。">?</span></span><span class="val" id="vIndexRate">0.50</span></div>
           <input type="range" id="indexRate" min="0" max="1" step="0.01" value="0.50">
         </div>
         <div class="ctl">
-          <div class="top"><span>音量包络 rms_mix_rate <span class="tip" data-tip="0=完全跟随原唱的音量起伏，1=完全用模型自己的能量。默认 0.20 最贴身，想更平稳（少起伏）就调大。">?</span></span><span class="val" id="vRms">0.30</span></div>
+          <div class="top"><span>音量包络 rms_mix_rate <span class="tip" data-tip="0=完全跟随原唱音量起伏，1=完全用模型自己的能量。默认 0.20 最贴身，想更平稳就调大。实测 0 与 1 的亮度差 0.1 个半音，可忽略。">?</span></span><span class="val" id="vRms">0.30</span></div>
           <input type="range" id="rmsMixRate" min="0" max="1" step="0.01" value="0.30">
         </div>
         <div class="ctl">
-          <div class="top"><span>保护 protect <span class="tip" data-tip="保护气声、清辅音，防止破音。高音突然断裂或出现重复/卡住的音时，先把它调到 0.4~0.5。">?</span></span><span class="val" id="vProtect">0.40</span></div>
+          <div class="top"><span>保护 protect <span class="tip" data-tip="保护气声与清辅音、防止破音。高音突然断裂或出现重复/卡住的音，先提到 0.4~0.5。实测 0.2 与 0.45 的质心完全一样（1759 Hz）——它不是调亮度的旋钮。">?</span></span><span class="val" id="vProtect">0.40</span></div>
           <input type="range" id="protect" min="0" max="0.5" step="0.01" value="0.40">
         </div>
         <div class="ctl">
-          <div class="top"><span>滤波半径 filter_radius <span class="tip" data-tip="0~7 是内核的真实范围（再大没有额外效果）。注意：这一版内核里它只对 harvest 生效（大于 2 就把音高曲线做一次 3 点中值滤波），rmvpe / crepe 下几乎不起作用——想让音高更稳，优先用 rmvpe + protect，或者把 f0 换成 harvest。">?</span></span><span class="val" id="vFilter">7</span></div>
+          <div class="top"><span>滤波半径 filter_radius <span class="tip" data-tip="0~7 是内核真实范围（再大无效）。这一版内核里它只对 harvest 生效（>2 时对音高曲线做一次 3 点中值滤波），rmvpe / crepe 下几乎不起作用，实测 0 与 7 的质心只差 0.03 个半音。想让音高更稳请优先用 rmvpe + protect。">?</span></span><span class="val" id="vFilter">7</span></div>
           <input type="range" id="filterRadius" min="0" max="7" step="1" value="7">
         </div>
         <div class="ctl">
@@ -398,7 +398,7 @@
           <select id="limiter"><option value="1" selected>开</option><option value="0">关</option></select>
         </div>
         <div class="field">
-          <label>人声混响 <span class="tip" data-tip="只加在转换后的人声上（平行送出，不动干声），用来把干净的新人声粘回伴奏的空间里。0=关。效果器重的歌 12~20% 常有明显帮助；加多了人声会糊、字会拖尾。">?</span></label>
+          <label>人声混响 <span class="tip" data-tip="只加在转换后的人声上（平行送出，不动干声），把干净的新人声粘回伴奏的空间里。0=关；效果器重的歌 12~20% 常有明显帮助，加多了人声会糊、字会拖尾。第①步的四个混响参数会自动带过来，诊断也会按清理方式先给一个起始值。">?</span></label>
           <input type="range" id="reverb" min="0" max="80" step="1" value="0">
           <span class="val" id="vRev">0%</span>
         </div>
@@ -418,7 +418,7 @@
           <span class="val" id="vRevH">7000Hz</span>
         </div>
         <div class="field">
-          <label>亮度 EQ <span class="tip" data-tip="高频架子（8kHz 以上）。比原唱亮太多就往下拉 2~4 dB，暗太多就加 2~3 dB。PitchIn-Q 诊断出的 brightness 偏差可以直接在这里补偿。">?</span></label>
+          <label>亮度 EQ <span class="tip" data-tip="高频架子（8kHz 以上）。开着「校正到原唱音色」时它会被自动填 0（两者都做等于调两次）；只有关掉音色对齐、想手调时才用：偏亮 −2~−4 dB，偏暗 +2~+3 dB。实测 1 dB ≈ 1.7 个半音质心。">?</span></label>
           <input type="range" id="eqAir" min="-6" max="6" step="0.1" value="0">
           <span class="val" id="vEqAir">0dB</span>
         </div>
@@ -942,15 +942,21 @@ $('#presetStable').onclick = () => {
      现在降级为“可选路线”，只在这些情况下比默认预设好：
      ① 模型的音色本身就是卖点（想更像目标角色）② 气声/耳语/弱混声为主
      ③ 源录音很轻、峰值还有余量（pre_gain 18 真推得动）④ 长音颤音多、想要更顺的音高轨迹 */
-  $('#sepClean').value = 'none';
+  $('#sepClean').value = 'none'; $('#fmt').value = 'mp3';
   $('#indexMode').value = 'auto'; $('#isHalf').value = '1';
   $('#pitch').value = '0'; $('#indexRate').value = '0.60';
   $('#rmsMixRate').value = '0.20'; $('#protect').value = '0.47';
-  $('#filterRadius').value = '7'; $('#f0Method').value = 'rmvpe';
+  $('#filterRadius').value = '7'; $('#f0Method').value = 'crepe';
   $('#resampleSr').value = '0'; $('#preGain').value = '18'; $('#autoLevel').value = '0';
   $('#maxSegment').value = '100'; $('#indexK').value = '10';
+  /* 抒情路线：干声不清理、音色对齐开着但 EQ 归零、混响给到 14% / 2.2s 的"房间感" */
+  $('#timbreOn').checked = true;
+  $('#eqAir').value = '0'; $('#eqPres').value = '0'; $('#eqBody').value = '0';
+  $('#reverb').value = '14'; $('#revDecay').value = '2.2';
+  $('#revPre').value = '30'; $('#revDamp').value = '6500';
+  S.revTouched = true;
   syncLabels();
-  toast('已套用预设 A（抒情/气声）：index 0.60 / rms 0.20 / protect 0.47 / pre_gain 18 / rmvpe');
+  toast('已套用预设 A（抒情/气声）：不清理人声 / index 0.60 · rms 0.20 · protect 0.47 / crepe / pre_gain 18 / 混响 14% 2.2s / MP3');
 };
 
 $('#presetHard').onclick = () => {
@@ -964,6 +970,11 @@ $('#presetHard').onclick = () => {
   $('#filterRadius').value = '7'; $('#f0Method').value = 'crepe';
   $('#resampleSr').value = '0'; $('#preGain').value = '10'; $('#autoLevel').value = '0';
   $('#maxSegment').value = '100'; $('#indexK').value = '28';
+  $('#timbreOn').checked = true;
+  $('#eqAir').value = '0'; $('#eqPres').value = '0'; $('#eqBody').value = '0';
+  $('#reverb').value = '8'; $('#revDecay').value = '1.8';
+  $('#revPre').value = '25'; $('#revDamp').value = '7000';
+  S.revTouched = true;
   syncLabels();
   toast('已套用硬骨头预设 B：去和声 + index 0.50 / rms 0.30 / protect 0.40 / crepe / index_k 28 / pre_gain 10 / 单段 100s / MP3 320k');
 };
