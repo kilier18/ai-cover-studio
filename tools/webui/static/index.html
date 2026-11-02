@@ -445,6 +445,11 @@
           </label>
         </div>
         <div class="field">
+          <label>共振峰 <span class="tip" data-tip="整条人声的「声道长度」。1.00=不动；&lt;1（0.80~0.95）=声道变长、听感更低更沉，音高一个半音都不动；&gt;1 更年轻更薄。觉得「音高听着偏高但 pitch 是 0」时用它，而不是改 pitch。实测模型常有 +3 半音的共振峰偏差（古明地恋 × 少女期の終わりに：F2 2760 vs 原唱 2293），×0.92 就能拉回 +0.3 半音。诊断会自动给出建议值。">?</span></label>
+          <input type="range" id="formant" min="0.80" max="1.10" step="0.01" value="1.00">
+          <span class="val" id="vFormant">1.00</span>
+        </div>
+        <div class="field">
           <label>成品名</label>
           <input type="text" id="outName" placeholder="留空自动命名" style="width:180px">
         </div>
@@ -789,7 +794,7 @@ $('#run1').onclick = async () => {
 
 /* ---------- 第③步：PitchIn-Q 自动填参 ---------- */
 const REV_BY_CLEAN = { none: 6, backing: 8, dereverb: 12, both: 14 };
-const DIAG_TO_ID = { eq_air: 'eqAir', eq_presence: 'eqPres', eq_body: 'eqBody' };
+const DIAG_TO_ID = { eq_air: 'eqAir', eq_presence: 'eqPres', eq_body: 'eqBody', formant: 'formant' };
 let LAST_DIAG = null;
 
 function setSlider(id, v){
@@ -919,13 +924,14 @@ function syncLabels(){
   $('#vEqAir').textContent = parseFloat($('#eqAir').value).toFixed(1) + 'dB';
   $('#vEqPres').textContent = parseFloat($('#eqPres').value).toFixed(1) + 'dB';
   $('#vEqBody').textContent = parseFloat($('#eqBody').value).toFixed(1) + 'dB';
+  $('#vFormant').textContent = parseFloat($('#formant').value).toFixed(2);
   /* 预设按钮/程序化改值不会触发 input 事件，这里把数字框同步回来 */
   ['pitch','indexRate','rmsMixRate','protect','filterRadius','preGain','maxSegment','indexK','reverb','revDecay','revPre','revDamp'].forEach(id => {
     const s = $('#'+id), n = $('#num_'+id);
     if (s && n && document.activeElement !== n) n.value = s.value;
   });
 }
-['pitch','indexRate','rmsMixRate','protect','filterRadius','resampleSr','preGain','maxSegment','indexK','reverb','revDecay','revPre','revDamp','eqAir','eqPres','eqBody'].forEach(id => { $('#'+id).oninput = syncLabels; });
+['pitch','indexRate','rmsMixRate','protect','filterRadius','resampleSr','preGain','maxSegment','indexK','reverb','revDecay','revPre','revDamp','eqAir','eqPres','eqBody','formant'].forEach(id => { $('#'+id).oninput = syncLabels; });
 /* 第 1 步的「混响参数」直接写进第 3 步，省得来回切 */
 const revLink = [['sepRevWet','reverb'],['sepRevDecay','revDecay'],['sepRevPre','revPre'],['sepRevDamp','revDamp']];
 revLink.forEach(([a,b]) => {
@@ -1058,6 +1064,7 @@ $('#run3').onclick = async () => {
                  reverb_damp: parseFloat($('#revDamp').value) || 7000,
                  matcher: { enabled: $('#matchOn').checked && !!(S.song && S.song.path),
                             reference: S.song ? S.song.path : null },
+                 formant: parseFloat($('#formant').value) || 1.0,
                  timbre_match: { enabled: $('#timbreOn').checked && !!S.vocal,
                                  reference: S.vocal || null },
                  format: $('#fmt').value, limiter: $('#limiter').value === '1',

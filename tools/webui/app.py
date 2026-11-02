@@ -538,6 +538,9 @@ def api_mix():
     eq_body = float(data.get("eq_body") or 0)
     if eq_air or eq_pres or eq_body:
         cmd += ["--eq-air", str(eq_air), "--eq-presence", str(eq_pres), "--eq-body", str(eq_body)]
+    formant = float(data.get("formant") or 1.0)
+    if abs(formant - 1.0) > 1e-3:
+        cmd += ["--formant", str(formant)]
     tm = data.get("timbre_match") or {}
     if tm.get("enabled") and tm.get("reference"):
         try:
@@ -548,6 +551,8 @@ def api_mix():
     else:
         tm_ref = None
     steps = ["混音与导出"]
+    if abs(formant - 1.0) > 1e-3:
+        steps.insert(0, f"共振峰校正 ×{formant:.2f}（音高不变）")
     if tm_ref:
         steps.insert(0, "音色对齐（按原唱频谱校正）")
     if rev > 0:

@@ -158,6 +158,8 @@ def main(argv=None) -> int:
                    help="靠前度：>0 人声更贴脸（3kHz 峰值），<0 退后，单位 dB")
     p.add_argument("--eq-body", type=float, default=0.0,
                    help="厚度：>0 更暖更厚（180Hz 低架），<0 去浑浊，单位 dB")
+    p.add_argument("--formant", type=float, default=1.0,
+                   help="共振峰整体缩放（<1 声道变长、听感更低更沉，音高不变；0.80~1.10）")
     p.add_argument("--timbre-match", default="",
                    help="参考人声（源唱干声）：把线上人声的频谱形状对齐到它")
     p.add_argument("--timbre-max-db", type=float, default=12.0,
@@ -176,6 +178,18 @@ def main(argv=None) -> int:
     n = max(len(voc), len(inst))
     voc = np.pad(voc, ((0, n - len(voc)), (0, 0)))
     inst = np.pad(inst, ((0, n - len(inst)), (0, 0)))
+
+    if abs(args.formant - 1.0) > 1e-3:
+        try:
+            sys.path.insert(0, str(Path(__file__).resolve().parent))
+            from formant import shift as _fshift
+
+            mono = voc.mean(axis=1) if voc.ndim > 1 else voc
+            z = _fshift(np.asarray(mono, dtype=np.float32), sr, args.formant)
+            voc = np.stack([z] * voc.shape[1], axis=1) if voc.ndim > 1 else z
+            print(f"formant: x{args.formant:.2f}（音高不变，共振峰整体缩放）")
+        except Exception as e:  # noqa: BLE001
+            print(f"formant: 跳过（{e}）")
 
     if args.timbre_match:
         try:

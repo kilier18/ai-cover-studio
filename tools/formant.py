@@ -33,7 +33,8 @@ def _lpc_env(frame, order=ORDER, n_fft=N_FFT):
 
 def _warp(env, factor, n_fft=N_FFT):
     nb = len(env)
-    idx = np.arange(nb) * factor
+    # H'(f) = H(f / factor)：factor<1 → 共振峰整体下移（声道变长，听感更低）
+    idx = np.arange(nb) / max(factor, 1e-6)
     lo = np.floor(idx).astype(int)
     hi = np.minimum(lo + 1, nb - 1)
     frac = idx - lo
@@ -60,7 +61,8 @@ def shift(y, sr, factor):
             wsum[i:i + N_FFT] += win ** 2
             continue
         env2 = _warp(env, factor)
-        ratio = env2 / env
+        ratio = np.nan_to_num(env2 / env, nan=1.0, posinf=0.0, neginf=0.0)
+        ratio = np.clip(ratio, 0.02, 30.0)
         spec = np.fft.rfft(seg * win)
         seg2 = np.fft.irfft(spec * ratio, N_FFT).astype(np.float32)
         # 保电平：搬移包络会改变帧能量，逐帧拉回原 RMS，避免出现"抽气"式电平跳变
@@ -70,7 +72,7 @@ def shift(y, sr, factor):
         out[i:i + N_FFT] += seg2 * win
         wsum[i:i + N_FFT] += win ** 2
     wsum = np.maximum(wsum, 1e-6)
-    out = out / wsum
+    out = np.nan_to_num(out / wsum, nan=0.0, posinf=0.0, neginf=0.0)
     return out[pad:pad + n]
 
 
