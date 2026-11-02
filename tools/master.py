@@ -101,6 +101,7 @@ def main() -> int:
     )
 
     t0 = time.time()
+    matched = True
     try:
         mg.process(
             target=str(target),
@@ -108,14 +109,27 @@ def main() -> int:
             results=[mg.pcm24(str(work))],
             config=config,
         )
-    except Exception as exc:
-        log(f"Matchering 失败：{exc}")
-        return 2
+    except Exception as exc:  # noqa: BLE001
+        # 匹配失败不能把整个导出搞崩：退化成「直接转码」，成品照样有
+        matched = False
+        elapsed = time.time() - t0
+        log(f"Matchering 失败（{type(exc).__name__}: {exc}），改为直接转码，不做母带匹配")
     elapsed = time.time() - t0
 
     if not work.exists():
-        log("Matchering 没有产出文件")
-        return 2
+        # 没拿到匹配结果（失败或没产出）：直接转码，别让导出失败
+        if matched:
+            log("Matchering 没有产出文件，改为直接转码")
+        if fmt == "wav":
+            shutil.copyfile(str(target), str(output))
+        else:
+            ffmpeg_convert(target, output, fmt, args.bitrate)
+        log(f"mastered -> {output} ({elapsed:.1f}s, 未做母带匹配)")
+        if args.json:
+            print(json.dumps({"ok": True, "output": str(output), "format": fmt,
+                              "matched": False, "elapsed_s": round(elapsed, 2),
+                              "before": before}, ensure_ascii=False), flush=True)
+        return 0
 
     if fmt == "wav":
         shutil.move(str(work), str(output))

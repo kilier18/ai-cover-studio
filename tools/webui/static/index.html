@@ -106,6 +106,8 @@
     <button id="t2" data-tab="2">② 转换</button>
     <button id="t3" data-tab="3">③ 合成</button>
   </div>
+  <button class="ghost small" id="preheat" title="先把模型文件读一遍（几十分钟不跑也不会白等冷启动的几十秒）">🔥 预热</button>
+  <button class="ghost small" id="resume" title="扫 work/ 里最近一次留下的干声 / 伴奏 / 转换结果，崩溃或重启后可以接着往下跑">⏪ 接着上次</button>
   <button class="ghost small" id="clean" title="一键删除各步骤留下的临时文件（成品 work/final 永远保留）">🧹 清理临时文件</button>
   <button class="ghost small" id="quit" title="关闭本地服务（之后可重新双击桌面快捷方式启动）">⏻ 退出</button>
 </header>
@@ -649,6 +651,46 @@ function updCleanTotal(){
   go.disabled = keys.length === 0;
 }
 $('#clean').onclick = openClean;
+
+/* ---------- 预热 / 接着上次 ---------- */
+function watchSimple(jobId, onDone){
+  const t = setInterval(async () => {
+    let j;
+    try{ j = await api('/api/job/' + jobId); }catch(e){ clearInterval(t); toast(e.message, true); return; }
+    if(j.status === 'running' || j.status === 'queued'){
+      const label = (j.steps && j.steps[j.step]) || '处理中';
+      toast('进度：' + label + '（' + (j.progress || 0) + '%）');
+      return;
+    }
+    clearInterval(t);
+    if(j.status === 'done'){ toast('完成'); onDone && onDone(j); }
+    else toast(j.error || '失败', true);
+  }, 1500);
+}
+$('#preheat').onclick = async () => {
+  try{
+    const j = await api('/api/preheat', {});
+    toast('正在把模型文件读一遍（几十秒）…');
+    watchSimple(j.job);
+  }catch(e){ toast(e.message, true); }
+};
+$('#resume').onclick = async () => {
+  let d;
+  try{ d = await api('/api/resume'); }catch(e){ toast(e.message, true); return; }
+  const rows = [];
+  if(d.song) rows.push('原曲：' + d.song.name + '（' + d.song.at + '）');
+  if(d.vocal) rows.push('干声：' + d.vocal.name + '（' + d.vocal.at + '）');
+  if(d.inst) rows.push('伴奏：' + d.inst.name + '（' + d.inst.at + '）');
+  if(d.converted) rows.push('转换结果：' + d.converted.name + '（' + d.converted.at + '）');
+  if(!rows.length) return toast('没找到可续用的产物', true);
+  if(!confirm('载入最近一次产物？\n\n' + rows.join('\n'))) return;
+  if(d.song){ S.song = {path: d.song.path, name: d.song.name}; }
+  if(d.vocal){ S.vocal = d.vocal.path; setMedia($('#a1v'), S.vocal); }
+  if(d.inst){ S.inst = d.inst.path; setMedia($('#a1i'), S.inst); }
+  if(d.converted){ S.conv = d.converted.path; setMedia($('#a2'), S.conv, true); $('#out2').hidden = false; }
+  refreshChips();
+  toast('已载入，可以直接跳到需要的步骤');
+};
 $('#svClean').onclick = () => { $('#savedModal').hidden = true; openClean(); };
 $('#cleanCancel').onclick = () => { $('#cleanModal').hidden = true; };
 $('#cleanGo').onclick = async () => {
@@ -694,7 +736,8 @@ function runJob(jobId, ui){
         ui.onDone && ui.onDone(j);
         showSaved(j);
       } else {
-        ui.phase.textContent = j.status === 'canceled' ? '已取消' : '失败';
+        ui.phase.textContent = j.status === 'canceled' ? '已取消' : ('失败：' + (j.error || '看下面的日志'));
+        if(j.warnings && j.warnings.length) toast(j.warnings.join(' / '), true);
         ui.onFail && ui.onFail(j);
       }
     }
@@ -1030,8 +1073,8 @@ $('#runPrev').onclick = async () => {
     const j = await api('/api/preview', body);
     runJob(j.job, Object.assign(ui, {onDone: () => {
       setMedia($('#aP0'), j.clip_rel);
-      setMedia($('#aP1'), j.voice_rel + '?t=' + Date.now());
-      if(j.mix_rel){ setMedia($('#aP2'), j.mix_rel + '?t=' + Date.now()); $('#boxPMix').hidden = false; }
+      setMedia($('#aP1'), j.voice_rel, true);
+      if(j.mix_rel){ setMedia($('#aP2'), j.mix_rel, true); $('#boxPMix').hidden = false; }
       else $('#boxPMix').hidden = true;
       $('#outP').hidden = false;
       $('#runPrev').disabled = false;
@@ -1049,7 +1092,7 @@ $('#run2').onclick = async () => {
     const j = await api('/api/convert', Object.assign(params(), { vocal: S.vocal }));
     runJob(j.job, Object.assign(ui, {onDone: res => {
       S.conv = j.out;
-      setMedia($('#a2'), j.out_rel + '?t=' + Date.now());
+      setMedia($('#a2'), j.out_rel, true);
       $('#d2out').href = dl(j.out_rel); $('#d2out').setAttribute('download', baseName(j.out));
       $('#out2').hidden = false;
       $('#run2').disabled = false; $('#run2').textContent = '再次转换';
@@ -1108,7 +1151,7 @@ $('#run3').onclick = async () => {
     const j = await api('/api/mix', body);
     runJob(j.job, Object.assign(ui, {onDone: () => {
       S.mixed = j.out;
-      setMedia($('#a3'), j.out_rel + '?t=' + Date.now());
+      setMedia($('#a3'), j.out_rel, true);
       $('#d3out').href = dl(j.out_rel); $('#d3out').setAttribute('download', baseName(j.out));
       $('#out3').hidden = false; $('#run3').disabled = false;
       $('#t3').classList.add('done');
@@ -1120,7 +1163,7 @@ $('#run3').onclick = async () => {
 };
 
 /* ---------- 通用：音轨 / 导出 / 跳转 ---------- */
-function setMedia(el, p){ if(p) el.src = '/media?p=' + encodeURIComponent(String(p).replace(/\\/g,'/')) + (String(p).includes('?') ? '' : '&t=' + Date.now()); }
+function setMedia(el, p, noCache){ if(p) el.src = '/media?p=' + encodeURIComponent(String(p).replace(/\\/g,'/')) + (noCache ? '&t=' + Date.now() : ''); }
 function dl(p){ return '/media?p=' + encodeURIComponent(String(p).replace(/\\/g,'/')) + '&dl=1'; }
 function baseName(p){ return String(p).replace(/\\/g,'/').split('/').pop(); }
 function refreshChips(){

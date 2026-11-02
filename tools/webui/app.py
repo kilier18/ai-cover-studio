@@ -142,10 +142,20 @@ def new_job(title: str, steps_label: list[str], reveal: str | None = None) -> st
     return jid
 
 
+JOBS_DIR = WORK / "_jobs"
+
+
 def jlog(jid: str, line: str) -> None:
     line = line.rstrip()
     if not line:
         return
+    # 同时落盘：网页端崩了/重启了，还能翻 work/_jobs/<jid>.log 找原因
+    try:
+        JOBS_DIR.mkdir(parents=True, exist_ok=True)
+        with (JOBS_DIR / f"{jid}.log").open("a", encoding="utf-8") as fh:
+            fh.write(line + "\n")
+    except Exception:  # noqa: BLE001
+        pass
     with JOBS_LOCK:
         job = JOBS[jid]
         job["log"].append(line)
@@ -164,6 +174,11 @@ def jlog(jid: str, line: str) -> None:
 def finish(jid: str, result=None, error=None, canceled: bool = False) -> None:
     with JOBS_LOCK:
         job = JOBS[jid]
+        if error:
+            # 失败消息带上最后几行日志：以前只给"exit 1"，根本不知道死在哪
+            tail = [x for x in job["log"][-4:] if x and not x.startswith("$ ")]
+            if tail:
+                error = error + " ｜ " + " ｜ ".join(tail[-2:])
         job["status"] = "canceled" if canceled else ("error" if error else "done")
         job["error"] = error
         job["result"] = result
@@ -256,6 +271,12 @@ def _run_job_inner(jid: str, steps: list[dict], use_sem: bool = True) -> None:
                     finish(jid, canceled=True)
                     return
                 if p.returncode != 0:
+                    if step.get("optional"):
+                        jlog(jid, f"⚠ 这一步失败了（exit {p.returncode}），先按可用的继续")
+                        with JOBS_LOCK:
+                            JOBS[jid].setdefault("warnings", []).append(
+                                f"{Path(str(cmd[1])).name} 失败（exit {p.returncode}）")
+                        continue
                     finish(jid, error=f"命令失败 (exit {p.returncode})：{Path(str(cmd[1])).name}")
                     return
                 result.update(found)
@@ -415,6 +436,47 @@ def api_prefs_set():
             return jsonify({"error": str(e)}), 500
         return jsonify({"ok": True, "formant": by_model[model]})
     return jsonify({"ok": False, "error": "需要 model 与 formant"}), 400
+
+
+@app.post("/api/preheat")
+def api_preheat():
+    """把模型文件读一遍热缓存：第一次跑某一步的冷启动（磁盘+杀毒）能省掉几十秒。"""
+    py311 = str(sys.executable)
+    rvc = str(RVC_PY) if RVC_PY else py311
+    tool = str(TOOLS / "preheat.py")
+    cmds = [{"cmd": [py311, tool], "capture": {}}]
+    if rvc != py311:
+        cmds.append({"cmd": [rvc, tool, "--no-import"], "capture": {}, "optional": True})
+    jid = new_job("预热模型缓存", ["主环境（分离 / 混音）", "RVC 环境（转换）"])
+    start(jid, cmds)
+    return jsonify({"job": jid})
+
+
+@app.get("/api/resume")
+def api_resume():
+    """扫一遍 work/ 里最近留下的产物，崩溃/重启后可以接着跑后面步骤。"""
+
+    def newest(paths: list[Path]) -> dict | None:
+        items = [p for p in paths if p.is_file()]
+        if not items:
+            return None
+        p = max(items, key=lambda x: x.stat().st_mtime)
+        st = p.stat()
+        return {"path": str(p), "rel": rel(p), "name": p.name,
+                "mb": round(st.st_size / (1 << 20), 1),
+                "at": time.strftime("%m-%d %H:%M", time.localtime(st.st_mtime))}
+
+    conv = newest(sorted((WORK / "converted").glob("*.wav")) if (WORK / "converted").is_dir() else [])
+    stems = []
+    sep_root = WORK / "separated"
+    if sep_root.is_dir():
+        for d in sep_root.iterdir():
+            stems.append(d / "stems" / "vocals.wav")
+            stems.append(d / "stems" / "instrumental.wav")
+    voc = newest([p for p in stems if p.name == "vocals.wav"])
+    inst = newest([p for p in stems if p.name == "instrumental.wav"])
+    up = newest(sorted((WORK / "_uploads").glob("*")) if (WORK / "_uploads").is_dir() else [])
+    return jsonify({"converted": conv, "vocal": voc, "inst": inst, "song": up})
 
 
 @app.post("/api/upload")
@@ -597,7 +659,8 @@ def api_mix():
                 "--output", str(out), "--format", fmt]
         if not data.get("limiter", True):
             cmd2.append("--no-limiter")
-        cmds.append({"cmd": cmd2, "capture": {"mastered": r"mastered -> (.+?) \("}})
+        cmds.append({"cmd": cmd2, "capture": {"mastered": r"mastered -> (.+?) \("},
+                     "optional": True})   # Matchering 挂了也要出片（master.py 内部会退化成直接转码）
         steps.append("母带匹配 Matchering（对齐参考曲的响度与频响）")
     jid = new_job(f"合成 · {out.name}", steps, reveal=str(out))
     start(jid, cmds)
@@ -830,6 +893,25 @@ def _ensure_streams() -> None:
             setattr(sys, name, open(log, "a", encoding="utf-8", buffering=1))
 
 
+def _warm_model_cache() -> None:
+    """服务刚起来时把模型文件读一遍，第一次跑分离/转换不用等磁盘和杀毒。
+
+    不用作业通道：它不该占显存的信号量，失败了也无所谓。
+    """
+    time.sleep(4)
+    tool = str(TOOLS / "preheat.py")
+    envs = [str(sys.executable)]
+    if RVC_PY and str(RVC_PY) != str(sys.executable):
+        envs.append(str(RVC_PY))
+    flags = 0x08000000 if os.name == "nt" else 0   # CREATE_NO_WINDOW
+    for exe in envs:
+        try:
+            subprocess.Popen([exe, tool], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                             creationflags=flags)
+        except Exception:  # noqa: BLE001
+            pass
+
+
 def main() -> int:
     _ensure_streams()
     ap = argparse.ArgumentParser()
@@ -852,6 +934,7 @@ def main() -> int:
 
     if args.open:
         threading.Timer(1.2, lambda: webbrowser.open(url)).start()
+    threading.Thread(target=_warm_model_cache, daemon=True).start()
     print(f"AI cover studio -> {url}")
     app.run(host=args.host, port=args.port, threaded=True, debug=False)
     return 0
