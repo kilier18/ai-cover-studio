@@ -725,8 +725,41 @@ async function loadModels(){
   const fav = j.rvc.find(m => m.name === '6') || j.rvc[0];
   if(fav) $('#rvcModel').value = fav.id;
   S.roots = j.roots || []; S.localModels = j.local_models;
+  await restoreFormant();
+  $('#rvcModel').onchange = () => restoreFormant();
   $('#health').classList.add('on');
   $('#healthTxt').textContent = `服务在线 · ${j.rvc.length} 个模型${j.rvc_ready ? '' : ' · 未找到 RVCMAX Runtime'}`;
+}
+
+/* ---------- 共振峰初值：按模型记住上次用的值 ---------- */
+let FORMANT_MEM = {};
+function modelKey(){ const v = $('#rvcModel').value || ''; const t = v.split(String.fromCharCode(92)).join('/'); return t.split('/').filter(Boolean).pop() || v; }
+async function loadPrefs(){
+  try{ FORMANT_MEM = (await api('/api/prefs')).formant_by_model || {}; }
+  catch(e){ FORMANT_MEM = {}; }
+  return FORMANT_MEM;
+}
+async function restoreFormant(){
+  if(!Object.keys(FORMANT_MEM).length) await loadPrefs();
+  const key = modelKey();
+  const v = FORMANT_MEM[key];
+  if(v !== undefined && v !== null){
+    $('#formant').value = v.toFixed(2);
+    syncLabels();
+    $('#vFormant').title = '这个模型上次用的是 ' + v.toFixed(2);
+    $('#vFormant').textContent = v.toFixed(2) + ' ·记忆';
+  }else{
+    $('#vFormant').title = '还没为这个模型存过初值';
+  }
+}
+async function rememberFormant(){
+  const key = modelKey();
+  const v = parseFloat($('#formant').value) || 1.0;
+  if(!key) return;
+  try{
+    const r = await api('/api/prefs', {model: key, formant: v});
+    if(r && r.ok){ FORMANT_MEM[key] = r.formant; }
+  }catch(e){ /* 记忆失败不影响出片 */ }
 }
 
 /* ---------- 模型目录：打开 / 导入 ---------- */
@@ -1080,6 +1113,7 @@ $('#run3').onclick = async () => {
       $('#out3').hidden = false; $('#run3').disabled = false;
       $('#t3').classList.add('done');
       toast('成品已生成：' + baseName(j.out));
+      rememberFormant();
       $('#a3').play().catch(() => {});
     }}));
   }catch(e){ $('#run3').disabled = false; toast(e.message, true); }

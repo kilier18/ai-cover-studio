@@ -385,6 +385,38 @@ def api_models():
                     "local_models": str(LOCAL_MODELS)})
 
 
+PREFS_FILE = WORK / "_ui_prefs.json"
+
+
+def read_prefs() -> dict:
+    try:
+        return json.loads(PREFS_FILE.read_text("utf-8"))
+    except Exception:
+        return {}
+
+
+@app.get("/api/prefs")
+def api_prefs():
+    return jsonify(read_prefs())
+
+
+@app.post("/api/prefs")
+def api_prefs_set():
+    b = request.get_json(force=True, silent=True) or {}
+    model = str(b.get("model") or "").strip()
+    if model and b.get("formant") is not None:
+        prefs = read_prefs()
+        by_model = prefs.setdefault("formant_by_model", {})
+        by_model[model] = round(float(b["formant"]), 2)
+        try:
+            WORK.mkdir(parents=True, exist_ok=True)
+            PREFS_FILE.write_text(json.dumps(prefs, ensure_ascii=False, indent=2), "utf-8")
+        except Exception as e:
+            return jsonify({"error": str(e)}), 500
+        return jsonify({"ok": True, "formant": by_model[model]})
+    return jsonify({"ok": False, "error": "需要 model 与 formant"}), 400
+
+
 @app.post("/api/upload")
 def api_upload():
     f = request.files.get("file")

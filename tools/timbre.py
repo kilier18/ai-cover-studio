@@ -39,32 +39,39 @@ def load_mono(path) -> np.ndarray:
     return np.asarray(y, dtype=np.float32)
 
 
-def centroid(y: np.ndarray, sr: int = SR, max_sec: float = 60.0) -> float:
-    """能量加权频谱质心（Hz）——与 pitchinq.centroid 逐行一致的口径。
+def _frames(y: np.ndarray, max_sec: float = 60.0):
+    """一次切帧出幅度谱（F×T）与逐帧 RMS，替代逐帧 Python 循环。
 
-    只在有声帧上算（< -50 dBFS 跳过），先算每帧质心再按帧 RMS 加权。
+    口径与旧版 centroid 一致：2048 点 hanning 窗、hop 512、< -50 dBFS 的帧丢弃。
     """
-    n = min(len(y), int(sr * max_sec))
+    n = min(len(y), int(SR * max_sec))
     win_n, hop = 2048, 512
     if n < win_n * 2:
+        return None, None
+    idx = np.arange(0, n - win_n + 1, hop)
+    fr = y[idx[:, None] + np.arange(win_n)[None, :]]
+    mag = np.abs(np.fft.rfft(fr * np.hanning(win_n), axis=1)).T
+    rms = np.sqrt((fr ** 2).mean(axis=1))
+    return mag.astype(np.float32), rms
+
+
+def _centroid_of(mag, rms, sr: int = SR) -> float:
+    """由幅度谱直接算能量加权质心（只统计有声帧，按帧 RMS 加权）。"""
+    if mag is None or mag.size == 0:
         return 0.0
-    w = np.hanning(win_n)
-    f = np.fft.rfftfreq(win_n, 1.0 / sr)
-    vals, weights = [], []
-    for i in range(0, n - win_n, hop):
-        seg = y[i:i + win_n]
-        rms = float(np.sqrt((seg ** 2).mean()))
-        if rms < 0.00316:
-            continue
-        spec = np.abs(np.fft.rfft(seg * w))
-        tot = float(spec.sum())
-        if tot <= 0:
-            continue
-        vals.append(float((spec * f).sum() / tot))
-        weights.append(rms)
-    if not vals:
+    energy = mag.sum(axis=0)
+    keep = (rms >= 0.00316) & (energy > 0)
+    if not keep.any():
         return 0.0
-    return float(np.average(vals, weights=weights))
+    f = np.fft.rfftfreq(mag.shape[0] * 2 - 2, 1.0 / sr)
+    c = (f[:, None] * mag[:, keep]).sum(axis=0) / energy[keep]
+    return float(np.average(c, weights=rms[keep]))
+
+
+def centroid(y: np.ndarray, sr: int = SR, max_sec: float = 60.0) -> float:
+    """能量加权频谱质心（Hz）——与 pitchinq.centroid 逐行一致的口径。"""
+    mag, rms = _frames(y, max_sec)
+    return _centroid_of(mag, rms, sr)
 
 
 def _st(freq: float, ref: float) -> float:
@@ -74,6 +81,7 @@ def _st(freq: float, ref: float) -> float:
 
 
 def _apply(y: np.ndarray, gain: np.ndarray) -> np.ndarray:
+    y = np.nan_to_num(np.asarray(y, dtype=np.float32), nan=0.0, posinf=0.0, neginf=0.0)
     Y = librosa.stft(y, n_fft=N_FFT, hop_length=HOP)
     out = librosa.istft(Y * gain[:, None], hop_length=HOP, length=len(y))
     peak = float(np.abs(out).max())
@@ -83,6 +91,8 @@ def _apply(y: np.ndarray, gain: np.ndarray) -> np.ndarray:
 def ltas_gain(y: np.ndarray, ref: np.ndarray, max_db: float = 12.0,
               smooth: int = 9) -> np.ndarray:
     """平均谱功率比 → 幅度增益（dB），并做频域平滑。"""
+    y = np.nan_to_num(np.asarray(y, dtype=np.float32), nan=0.0, posinf=0.0, neginf=0.0)
+    ref = np.nan_to_num(np.asarray(ref, dtype=np.float32), nan=0.0, posinf=0.0, neginf=0.0)
     py = (np.abs(librosa.stft(y, n_fft=N_FFT, hop_length=HOP)) ** 2).mean(axis=1) + 1e-12
     pr = (np.abs(librosa.stft(ref, n_fft=N_FFT, hop_length=HOP)) ** 2).mean(axis=1) + 1e-12
     g_db = np.clip(10 * np.log10(pr / py), -max_db, max_db)
@@ -92,25 +102,49 @@ def ltas_gain(y: np.ndarray, ref: np.ndarray, max_db: float = 12.0,
 
 def match_timbre(y: np.ndarray, ref: np.ndarray, max_db: float = 12.0,
                  tol_st: float = 0.4) -> dict:
-    """闭环对齐：返回 {audio, st_before, st_after, tilt_db_oct, max_db}。"""
+    """闭环对齐：返回 {audio, st_before, st_after, tilt_db_oct, max_db}。
+
+    加速版：tilt 搜索在谱域解析式完成（只做 1 次 STFT + 1 次 istft），
+    不再对每个候选 tilt 都完整正反变换一遍。
+    """
     n = min(len(y), len(ref))
     y, ref = y[:n], ref[:n]
-    c_ref = centroid(ref)
-    st_before = _st(centroid(y), c_ref)
+    mag, rms = _frames(y)
+    mag_r, rms_r = _frames(ref)
+    c_ref = _centroid_of(mag_r, rms_r)
+    st_before = _st(_centroid_of(mag, rms), c_ref) if mag is not None else 0.0
+
     g0 = ltas_gain(y, ref, max_db=max_db)
     freqs = librosa.fft_frequencies(sr=SR, n_fft=N_FFT)
     octv = np.log2(np.maximum(freqs, 20) / 1000.0)
 
-    best = None
-    for tilt in (-3.0, -2.0, -1.5, -1.0, -0.7, -0.4, 0.0, 0.4, 0.7, 1.0, 1.5, 2.0, 3.0):
-        gain = 10 ** ((g0 + tilt * octv) / 20.0)
-        out = _apply(y, gain)
-        st = _st(centroid(out), c_ref)
-        if best is None or abs(st) < abs(best["st_after"]):
-            best = {"audio": out, "st_after": st, "tilt_db_oct": tilt}
-        if abs(st) <= tol_st:
-            break
+    best = {"st_after": 0.0, "tilt_db_oct": 0.0, "gain": 10 ** (g0 / 20.0)}
+    if mag is not None:
+        energy = mag.sum(axis=0)
+        keep = (rms >= 0.00316) & (energy > 0)
+        f = np.fft.rfftfreq(mag.shape[0] * 2 - 2, 1.0 / SR)
+        mk = mag[:, keep]
+        wk = rms[keep]
 
+        def st_for(tilt: float) -> tuple:
+            gain = 10 ** ((g0 + tilt * octv) / 20.0)
+            w = mk * gain[:, None]
+            e = w.sum(axis=0)
+            good = e > 0
+            c = (f[:, None] * w[:, good]).sum(axis=0) / e[good]
+            return _st(float(np.average(c, weights=wk[good])), c_ref), gain
+
+        tried = []
+        for tilt in (-3.0, -2.0, -1.5, -1.0, -0.7, -0.4, 0.0, 0.4, 0.7, 1.0, 1.5, 2.0, 3.0):
+            st, gain = st_for(tilt)
+            tried.append((abs(st), st, tilt, gain))
+            if abs(st) <= tol_st:
+                break
+        tried.sort(key=lambda r: r[0])
+        _, best_st, best_tilt, best_gain = tried[0]
+        best = {"st_after": best_st, "tilt_db_oct": best_tilt, "gain": best_gain}
+
+    best["audio"] = _apply(y, best.pop("gain"))
     best.update({"st_before": st_before, "max_db": max_db})
     return best
 
