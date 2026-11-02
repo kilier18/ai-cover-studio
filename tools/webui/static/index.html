@@ -125,7 +125,7 @@
       <h2><span class="n">⚙</span>分离参数</h2>
       <div class="row">
         <div class="field" style="flex:1;min-width:280px">
-          <label>分离模型 <span class="tip" data-tip="推荐用「Kim 无串音版」：人声更干、背景和声残留最少。BS-Roformer 伴奏更干净但人声会带一点伴奏。换模型只影响纯净度，不影响速度档位。">?</span></label>
+          <label>分离模型 <span class="tip" data-tip="只留两个场景各一个最优：标准流行用 BS-Roformer（人声 SI-SDR 最高、伴奏最干净）；重混响/效果器特别多的歌用 Kim 无串音（对空间尾巴和非人声成分压得最狠，实测尾巴 -99 dB）。换模型只影响纯净度，不影响速度档位。">?</span></label>
           <select id="sepModel"></select>
         </div>
         <div class="field">
@@ -145,20 +145,23 @@
           <select id="sepFp16"><option value="1" selected>fp16（快）</option><option value="0">fp32（稳）</option></select>
         </div>
         <div class="field">
-          <label>只留主唱 <span class="tip" data-tip="默认不处理：直接把人声原样送进 RVC（推荐，保留下来的和声反而让声音更饱满）。只有当某首歌和声/双轨叠唱特别重、出现口胡或重复音时，才切到「去和声」——会多花约 30% 时间，且气声会略薄。">?</span></label>
-          <select id="sepLead"><option value="1">去和声（问题段再开）</option><option value="0" selected>保留全部人声（推荐）</option></select>
+          <label>人声清理 <span class="tip" data-tip="一个开关管两件事：去和声（和声/双轨叠唱特别重、出现口胡重复音时用，多花约 30% 时间）和去混响（录音湿、拖尾回声重时用，多花约 60% 时间）。只做分离最快；两样都做最干净，但气声会略薄。">?</span></label>
+          <select id="sepClean">
+            <option value="none" selected>只做分离（推荐）</option>
+            <option value="backing">去和声（和声重时）</option>
+            <option value="dereverb">去混响 / 回声（录音湿时）</option>
+            <option value="both">两样都做（最干净 · 最慢）</option>
+          </select>
         </div>
         <div class="field">
-          <label>净化人声 <span class="tip" data-tip="分离完再跑一遍「去串音」模型，专门压掉人声里残留的伴奏/和声，代价是多花约 40% 时间。注意：实验性二次净化，目前实测会过度削人声，默认关闭；除非人声里伴奏残留特别重再试。">?</span></label>
-          <select id="sepPurify"><option value="1">开启（实验 · 更慢）</option><option value="0" selected>关闭（推荐）</option></select>
-        </div>
-        <div class="field">
-          <label>去混响/回声 <span class="tip" data-tip="对干声再跑一遍 DeReverb-Echo 模型（Mel-Band RoFormer），把录音里的房间混响和拖尾回声剥掉，只留直达声送进 RVC——回声重的歌会明显干净、口胡更少。代价：多花约 60% 时间。棚里录的、本来就很干净的人声可以关掉。">?</span></label>
-          <select id="sepDereverb"><option value="1" selected>开启（推荐 · 回声重时自动跳过）</option><option value="0">关闭</option></select>
-        </div>
-        <div class="field">
-          <label>伴奏保留混响 <span class="tip" data-tip="分离时人声被拿走后，原唱那层的混响/回声也跟着被拿走了，伴奏会留下一个“空房间”。开启后把被剥掉的混响层按 80% 回填进伴奏（需先开「去混响/回声」），人声走了但空间还在，效果器多的歌会更融。">?</span></label>
-          <select id="sepInstRev"><option value="0" selected>不处理（推荐）</option><option value="1">回填 1×（原量）</option><option value="1.5">回填 1.5×（更湿）</option></select>
+          <label>混响参数 <span class="tip" data-tip="这四个值会直接写进第 3 步的混响设置，省得来回切。混响量=只加在人声上的湿声比例；时长=尾巴长短（1.2 紧、1.8 自然、2.5 以上偏大厅）；预延迟=湿声比干声晚多少毫秒进入（20~30ms 最像真实房间）；高频衰减=尾巴里高频掉多快（越低越暗）。">?</span></label>
+          <div style="display:flex;gap:6px;align-items:center">
+            <input type="number" id="sepRevWet" value="8" min="0" max="80" step="1" style="width:64px" title="混响量 %">
+            <input type="number" id="sepRevDecay" value="1.8" min="0.3" max="6" step="0.1" style="width:64px" title="混响时长 秒">
+            <input type="number" id="sepRevPre" value="25" min="0" max="100" step="5" style="width:64px" title="预延迟 ms">
+            <input type="number" id="sepRevDamp" value="7000" min="2000" max="16000" step="500" style="width:76px" title="高频衰减 Hz">
+          </div>
+          <div class="hint" style="margin-top:4px">% / 秒 / ms / Hz · 改这里第 3 步同步</div>
         </div>
       </div>
       <div style="margin-top:16px;display:flex;align-items:center;gap:12px">
@@ -210,7 +213,7 @@
       </h2>
       <div class="row" style="align-items:flex-end">
         <div class="field" style="flex:1;min-width:300px">
-          <label>RVC 模型 <span class="tip" data-tip="模型来自下面这些目录：本地的 rvc_models 是你自己导入的（可写），附加目录是只读借用。">?</span></label>
+          <label>RVC 模型 <span class="tip" data-tip="模型来自下面这些目录：D 盘的 rvc_models 是你自己导入的（可写），RVCMAX 那个是只读借用。">?</span></label>
           <select id="rvcModel"></select>
         </div>
         <div class="field" style="flex:0 0 auto">
@@ -290,7 +293,7 @@
         </div>
       </div>
       <details style="margin-top:12px">
-        <summary class="hint" style="cursor:pointer">实时变声专用参数（离线渲染不生效，仅供对照）</summary>
+        <summary class="hint" style="cursor:pointer">RVCMAX 实时变声专用参数（离线渲染不生效，仅供对照）</summary>
         <div class="grid muted" style="margin-top:10px">
           <div class="ctl"><div class="top"><span>formant 共振峰</span><span class="val">0</span></div><input type="range" min="-24" max="24" value="0" disabled></div>
           <div class="ctl"><div class="top"><span>block_time</span><span class="val">0.21</span></div><input type="range" disabled value="0.21"></div>
@@ -403,6 +406,37 @@
           <label>混响时长 <span class="tip" data-tip="混响尾巴的长度。1.2s 偏紧（流行/电子），1.8s 自然，2.5s 以上偏大厅/抒情。">?</span></label>
           <input type="range" id="revDecay" min="0.3" max="6" step="0.05" value="1.8">
           <span class="val" id="vRevD">1.8s</span>
+        </div>
+        <div class="field">
+          <label>预延迟 <span class="tip" data-tip="湿声比干声晚多少毫秒进来。0 太贴脸、糊；20~30ms 最像真实房间；拉大到 60ms 以上会变成明显的回声。">?</span></label>
+          <input type="range" id="revPre" min="0" max="100" step="1" value="25">
+          <span class="val" id="vRevP">25ms</span>
+        </div>
+        <div class="field">
+          <label>高频衰减 <span class="tip" data-tip="混响尾巴里高频掉多快（越低越暗、越像老磁带）。7000Hz 自然；4000Hz 以下会明显发闷；12000Hz 以上偏亮、适合电子。">?</span></label>
+          <input type="range" id="revDamp" min="2000" max="16000" step="500" value="7000">
+          <span class="val" id="vRevH">7000Hz</span>
+        </div>
+        <div class="field">
+          <label>亮度 EQ <span class="tip" data-tip="高频架子（8kHz 以上）。比原唱亮太多就往下拉 2~4 dB，暗太多就加 2~3 dB。PitchIn-Q 诊断出的 brightness 偏差可以直接在这里补偿。">?</span></label>
+          <input type="range" id="eqAir" min="-6" max="6" step="0.5" value="0">
+          <span class="val" id="vEqAir">0dB</span>
+        </div>
+        <div class="field">
+          <label>靠前度 <span class="tip" data-tip="3kHz 附近的峰值，管人声“贴不贴脸”。被伴奏压住就加 1~3 dB，太冲就往回收。">?</span></label>
+          <input type="range" id="eqPres" min="-6" max="6" step="0.5" value="0">
+          <span class="val" id="vEqPres">0dB</span>
+        </div>
+        <div class="field">
+          <label>厚度 <span class="tip" data-tip="180Hz 低架。声音单薄就加 2~3 dB，浑浊/轰头就减。">?</span></label>
+          <input type="range" id="eqBody" min="-6" max="6" step="0.5" value="0">
+          <span class="val" id="vEqBody">0dB</span>
+        </div>
+        <div class="field">
+          <label>母带匹配 <span class="tip" data-tip="导出前用 Matchering 把成品对齐到参考曲（默认就是这首原曲）的响度、频响和整体平衡——相当于“和原曲一样响、一样亮、一样厚”。多花几秒到十几秒；成品若变闷/变尖就关掉。">?</span></label>
+          <label style="display:flex;gap:6px;align-items:center;font-weight:400">
+            <input type="checkbox" id="matchOn"> 对齐到原曲
+          </label>
         </div>
         <div class="field">
           <label>成品名</label>
@@ -668,7 +702,7 @@ async function loadModels(){
   const best = j.separation.find(m => m.recommended) || j.separation[0];
   if(best) $('#sepModel').value = best.file;
   $('#rvcModel').innerHTML = j.rvc.map(m => {
-    const tag = (m.writable ? '本地' : '附加');
+    const tag = (m.writable ? 'D 盘' : 'RVCMAX');
     const nm = /^\d+$/.test(m.name) ? m.name + ' 号' : m.name;
     return `<option value="${m.id}">[${tag}] ${nm} · ${m.pth.replace('.pth','')}${m.index ? ' · index '+m.index_mb+'MB' : ' · 无索引'}</option>`;
   }).join('');
@@ -676,7 +710,7 @@ async function loadModels(){
   if(fav) $('#rvcModel').value = fav.id;
   S.roots = j.roots || []; S.localModels = j.local_models;
   $('#health').classList.add('on');
-  $('#healthTxt').textContent = `服务在线 · ${j.rvc.length} 个模型${j.rvc_ready ? '' : ' · 未找到 RVC Runtime'}`;
+  $('#healthTxt').textContent = `服务在线 · ${j.rvc.length} 个模型${j.rvc_ready ? '' : ' · 未找到 RVCMAX Runtime'}`;
 }
 
 /* ---------- 模型目录：打开 / 导入 ---------- */
@@ -714,11 +748,8 @@ $('#run1').onclick = async () => {
   const body = { input: S.song.path, name: S.song.name.replace(/\.[^.]+$/, ''),
                  model: $('#sepModel').value, fp16: $('#sepFp16').value === '1',
                  batch: parseInt($('#sepBatch').value) || 2,
-                 purify: $('#sepPurify').value === '1',
-                 strip_backing: $('#sepLead').value === '1',
-                 dereverb: $('#sepDereverb').value === '1',
-                 keep_inst_reverb: parseFloat($('#sepInstRev').value) > 0,
-                 inst_reverb_gain: parseFloat($('#sepInstRev').value) || 1.0,
+                 purify: false,
+                 clean: $('#sepClean').value,
                  segment: $('#sepSegment').value || null, overlap: $('#sepOverlap').value || null };
   $('#run1').disabled = true;
   const ui = uiOf(1); startUI(ui);
@@ -786,7 +817,7 @@ function addNumBox(id){
   n.onblur = () => { const x = clamp(n.value); n.value = (x === null ? s.value : x); };
   s.addEventListener('input', () => { n.value = s.value; });
 }
-['pitch','indexRate','rmsMixRate','protect','filterRadius','preGain','maxSegment','indexK','reverb','revDecay'].forEach(addNumBox);
+['pitch','indexRate','rmsMixRate','protect','filterRadius','preGain','maxSegment','indexK','reverb','revDecay','revPre','revDamp'].forEach(addNumBox);
 function syncLabels(){
   $('#vPitch').textContent = $('#pitch').value;
   $('#vIndexRate').textContent = parseFloat($('#indexRate').value).toFixed(2);
@@ -799,13 +830,26 @@ function syncLabels(){
   $('#vIdxK').textContent = $('#indexK').value;
   $('#vRev').textContent = $('#reverb').value + '%';
   $('#vRevD').textContent = parseFloat($('#revDecay').value).toFixed(1) + 's';
+  $('#vRevP').textContent = $('#revPre').value + 'ms';
+  $('#vRevH').textContent = $('#revDamp').value + 'Hz';
+  $('#vEqAir').textContent = parseFloat($('#eqAir').value).toFixed(1) + 'dB';
+  $('#vEqPres').textContent = parseFloat($('#eqPres').value).toFixed(1) + 'dB';
+  $('#vEqBody').textContent = parseFloat($('#eqBody').value).toFixed(1) + 'dB';
   /* 预设按钮/程序化改值不会触发 input 事件，这里把数字框同步回来 */
-  ['pitch','indexRate','rmsMixRate','protect','filterRadius','preGain','maxSegment','indexK','reverb','revDecay'].forEach(id => {
+  ['pitch','indexRate','rmsMixRate','protect','filterRadius','preGain','maxSegment','indexK','reverb','revDecay','revPre','revDamp'].forEach(id => {
     const s = $('#'+id), n = $('#num_'+id);
     if (s && n && document.activeElement !== n) n.value = s.value;
   });
 }
-['pitch','indexRate','rmsMixRate','protect','filterRadius','resampleSr','preGain','maxSegment','indexK','reverb','revDecay'].forEach(id => { $('#'+id).oninput = syncLabels; });
+['pitch','indexRate','rmsMixRate','protect','filterRadius','resampleSr','preGain','maxSegment','indexK','reverb','revDecay','revPre','revDamp','eqAir','eqPres','eqBody'].forEach(id => { $('#'+id).oninput = syncLabels; });
+/* 第 1 步的「混响参数」直接写进第 3 步，省得来回切 */
+const revLink = [['sepRevWet','reverb'],['sepRevDecay','revDecay'],['sepRevPre','revPre'],['sepRevDamp','revDamp']];
+revLink.forEach(([a,b]) => {
+  const src = $('#'+a), dst = $('#'+b);
+  if(!src || !dst) return;
+  src.oninput = () => { const v = parseFloat(src.value); if(isFinite(v)) { dst.value = v; syncLabels(); } };
+  src.value = dst.value;
+});
 syncLabels();
 $('#start').oninput = () => { $('#startNum').value = $('#start').value; };
 $('#startNum').oninput = () => { $('#start').value = $('#startNum').value; };
@@ -814,7 +858,7 @@ $('#presetStable').onclick = () => {
      现在降级为“可选路线”，只在这些情况下比默认预设好：
      ① 模型的音色本身就是卖点（想更像目标角色）② 气声/耳语/弱混声为主
      ③ 源录音很轻、峰值还有余量（pre_gain 18 真推得动）④ 长音颤音多、想要更顺的音高轨迹 */
-  $('#sepLead').value = '0'; $('#sepPurify').value = '0'; $('#sepDereverb').value = '1'; $('#sepInstRev').value = '0';
+  $('#sepClean').value = 'none';
   $('#indexMode').value = 'auto'; $('#isHalf').value = '1';
   $('#pitch').value = '0'; $('#indexRate').value = '0.60';
   $('#rmsMixRate').value = '0.20'; $('#protect').value = '0.47';
@@ -827,9 +871,9 @@ $('#presetStable').onclick = () => {
 
 $('#presetHard').onclick = () => {
   /* 2026-11-01「折中硬骨头 B」：用户在多个音源 × 多个模型上复测，听感普遍优于预设一。
-     缘起 song-c（172 BPM 快歌、人声极湿、吐字含糊）：
+     缘起 ガネメ,TaSk - Chu♡Chu♡Chu（172 BPM 快歌、人声极湿、吐字含糊）：
      去混响会把整首干声吃掉 → 关掉；降检索保咬字，index_k 拉高补音色，crepe 稳音高。 */
-  $('#sepLead').value = '0'; $('#sepPurify').value = '0'; $('#sepDereverb').value = '1'; $('#sepInstRev').value = '0';
+  $('#sepClean').value = 'none';
   $('#indexMode').value = 'auto'; $('#isHalf').value = '1';
   $('#pitch').value = '0'; $('#indexRate').value = '0.50';
   $('#rmsMixRate').value = '0.30'; $('#protect').value = '0.40';
@@ -905,6 +949,13 @@ $('#run3').onclick = async () => {
                  instrumental_gain: parseFloat($('#instGain').value) || 0,
                  reverb: parseFloat($('#reverb').value) || 0,
                  reverb_decay: parseFloat($('#revDecay').value) || 1.8,
+                 reverb_predelay: parseFloat($('#revPre').value) || 0,
+                 eq_air: parseFloat($('#eqAir').value) || 0,
+                 eq_presence: parseFloat($('#eqPres').value) || 0,
+                 eq_body: parseFloat($('#eqBody').value) || 0,
+                 reverb_damp: parseFloat($('#revDamp').value) || 7000,
+                 matcher: { enabled: $('#matchOn').checked && !!(S.song && S.song.path),
+                            reference: S.song ? S.song.path : null },
                  format: $('#fmt').value, limiter: $('#limiter').value === '1',
                  name: $('#outName').value.trim() || null };
   $('#run3').disabled = true;

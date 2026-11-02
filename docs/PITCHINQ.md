@@ -13,7 +13,8 @@ PitchIn-Q 是一个**按需启动、用完即走**的诊断器：给一对音频
 | --- | --- |
 | 歌唱人声诊断、定位音频缺陷（标注时间区间） | 音频分离 |
 | 对比源干声与 RVC 输出 | F0 提取（内部只为对齐用，不对外提供） |
-| 给出 RVC 可调参数方案（index_rate / rms_mix_rate / protect / f0 算法 / pitch） | 音频渲染、混音后期 |
+| 给出参数方案：RVC 侧（index_rate / rms_mix_rate / protect / f0 算法 / pitch）+ 导出侧（eq_air / eq_presence） | 音频渲染、混音后期（只给建议，不动手） |
+| 音色亮度诊断（频谱质心 vs 原唱，偏亮/偏暗两个方向） | 音高转换、去混响 |
 | 输出结构化 JSON | 主动触发自己（没有定时任务、没有自动挂载） |
 
 ---
@@ -21,7 +22,9 @@ PitchIn-Q 是一个**按需启动、用完即走**的诊断器：给一对音频
 ## 2. 调度规则（硬约束）
 
 1. **不常驻显存**：默认 `--backend dsp` 只做信号分析，**完全不碰 GPU**。
-2. **和 RVC 互斥加载**：需要走模型后端时，必须持有 `tools/gpulock.py` 的跨进程显存锁。
+2. **和 RVC 互斥加载（可配置）**：默认 `--lock-mode auto` —— 先问显卡还剩多少显存，
+   够 `模型体积 × 2.2 + 900 MB` 余量就**不加锁、与 RVC 并发跑**；不够才去排队拿 `tools/gpulock.py` 的锁。
+   `--lock-mode wait` 永远排队，`--lock-mode none` 完全不加锁（显存紧张时别用，会 OOM）。
 3. **异步调度**：拿不到锁就排队（`--wait-gpu 秒数`），等不到返回 `3`，绝不杀别人的进程。
 4. **诊断完自动卸载**：模型后端在 `finally` 里 `del model` + `gc.collect()` + `torch.cuda.empty_cache()`，
    并打印 `released_mb` 供核对。
@@ -199,3 +202,64 @@ python work/_diag/selftest.py
 
 真实用例（20 秒原唱干声 → 爱音模型转换）得到 `ok / 94 分 / 2 处重复字`，
 耗时约 10 秒（dsp 后端，零显存占用）。
+
+---
+
+## 9. 音色亮度（频谱质心）诊断
+
+用户最常问的一类问题：**「新人声听起来比原唱亮 / 闷」**。这不需要听，能直接量：
+
+- 指标：能量加权**频谱质心**（Hz），只统计高于 -50 dBFS 的帧，避免静音段把结果拉到 0。
+- 对比：`centroid_delta_st = 12 * log2(centroid_out / centroid_src)`，单位是**半音**（听感上比 Hz 更好理解）。
+- 阈值：`|Δ| ≥ 1.2` 音分记 `mid`，`|Δ| ≥ 2.5` 记 `high`；方向记成 `timbre_bright` / `timbre_dark`。
+- 实测参考：原唱干声 2530 Hz、某模型输出 1754 Hz → **-6.2 个半音（明显偏暗）**，这类模型通常高频被抹平。
+
+### 偏亮（比原唱大）怎么办
+
+| 层级 | 动作 | 说明 |
+| --- | --- | --- |
+| 导出 | `eq_air -2 ~ -4 dB` | 8 kHz 以上高架，直接收掉亮边、齿音、沙沙声 |
+| 导出 | `eq_presence -1 ~ -2 dB` | 3 kHz 峰值回调一半，避免只削高频导致音色断层 |
+| RVC | `index_rate -0.05` | 降检索，减少「模型味」（模型往往比真人亮） |
+| RVC | `filter_radius +1` | 加大滤波半径，压住金属音/齿音 |
+| 排查 | 看有无 `doubled_syllable` / `harsh` | 和声残留、齿音本身就会被算成「亮」 |
+
+### 偏暗（比原唱小）怎么办
+
+| 层级 | 动作 | 说明 |
+| --- | --- | --- |
+| 导出 | `eq_air +2 ~ +3 dB` | 补空气感，最直接 |
+| 导出 | `eq_presence +1 dB` | 让人声重新靠前 |
+| RVC | `index_rate +0.06` | 提高检索，从音色库补回高频与细节 |
+| RVC | `protect +0.03` | 减少过度平滑导致的发闷 |
+| 排查 | 看 `over_smooth` / `rms_mix_rate` | 包络混合比太低也会显得闷 |
+
+### 报告里长什么样
+
+```json
+"summary": {
+  "centroid_src_hz": 2530.0, "centroid_conv_hz": 1754.0,
+  "centroid_delta_st": -6.17, "timbre": "dark"
+},
+"param_plan": [
+  {"param": "eq_air", "stage": "mix", "from": 0.0, "to": 2.5,
+   "why": "比原唱暗，导出时把 8 kHz 以上加 +2.5 dB，补回空气感", "confidence": 0.7},
+  {"param": "eq_presence", "stage": "mix", "from": 0.0, "to": 1.2, "...": "..."},
+  {"param": "index_rate", "stage": "rvc", "from": 0.5, "to": 0.56, "...": "..."}
+]
+```
+
+`param_plan[].stage` 是新增字段：`rvc` 表示改 RVC 页的参数，`mix` 表示改第 3 步导出的 EQ。
+UI 上 `eq_air` ↔ `#eqAir`、`eq_presence` ↔ `#eqPres`，直接照着填即可。
+
+---
+
+## 10. 导出侧参数（第 3 步 / `tools/mix.py`）
+
+| 参数 | CLI | 范围 | 作用 |
+| --- | --- | --- | --- |
+| 亮度 | `--eq-air` | ±6 dB | 8 kHz 以上高架 |
+| 靠前度 | `--eq-presence` | ±6 dB | 2.2–4.2 kHz 带通钟形 |
+| 厚度 | `--eq-body` | ±6 dB | 180 Hz 低架 |
+| 混响 | `--reverb` / `--reverb-decay` / `--reverb-predelay` / `--reverb-damp` | 0–80% / 0.3–6 s / 0–100 ms / 2–16 kHz | 只加在转换后的人声上 |
+| 母带匹配 | `--matcher`（HTTP 侧：`matcher.enabled` + `matcher.reference`） | — | Matchering 对齐参考曲的响度与频响 |

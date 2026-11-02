@@ -54,6 +54,8 @@ DEFECT_LABEL = {
     "over_smooth": "过度平滑（气声、颤音丢失）",
     "wobble": "抖动/不稳（音高来回摆）",
     "offset": "整体时间偏移",
+    "timbre_bright": "音色偏亮（质心高于原唱）",
+    "timbre_dark": "音色偏暗（质心低于原唱）",
 }
 SEVERITY_W = {"low": 1, "mid": 3, "high": 6}
 
@@ -129,6 +131,35 @@ def hf_ratio(x: np.ndarray, sr: int = SR) -> tuple[float, float]:
         return -120.0, -120.0
     hf_db = 10 * np.log10(max(high, 1e-20) / max(low, 1e-20))
     return float(hf_db), float(10 * np.log10((low + high) / n))
+
+
+def centroid(x: np.ndarray, sr: int = SR, max_sec: float = 60.0) -> float:
+    """能量加权频谱质心（Hz）——「音色亮不亮」的客观指标。
+
+    只在有声音的帧上算（低于 -50 dBFS 的帧跳过），避免静音段把质心拉到 0。
+    人声通常在 1500–3500 Hz；比原唱高 10% ≈ 亮 1.65 个半音。
+    """
+    n = min(len(x), int(sr * max_sec))
+    win_n, hop = 2048, 512
+    if n < win_n * 2:
+        return 0.0
+    w = np.hanning(win_n)
+    f = np.fft.rfftfreq(win_n, 1.0 / sr)
+    vals, weights = [], []
+    for i in range(0, n - win_n, hop):
+        seg = x[i:i + win_n]
+        rms = float(np.sqrt((seg ** 2).mean()))
+        if rms < 0.00316:                     # -50 dBFS
+            continue
+        spec = np.abs(np.fft.rfft(seg * w))
+        tot = float(spec.sum())
+        if tot <= 0:
+            continue
+        vals.append(float((spec * f).sum() / tot))
+        weights.append(rms)
+    if not vals:
+        return 0.0
+    return float(np.average(vals, weights=weights))
 
 
 def rms_db(x: np.ndarray, win: int) -> np.ndarray:
@@ -332,6 +363,30 @@ def analyze(src: np.ndarray, conv: np.ndarray, params: dict, f0_method: str = "y
                          "values": {"flat_notes": flat_cnt, "notes": tot_cnt,
                                     "keep_ratio": round(med, 2)}})
 
+    # --- 音色亮度：频谱质心 vs 原唱
+    cen_a = centroid(a)
+    cen_b = centroid(b)
+    cen_st = 0.0
+    if cen_a > 0 and cen_b > 0:
+        cen_st = 12.0 * float(np.log2(cen_b / cen_a))
+        dur = round(n / SR, 2)
+        if cen_st >= 1.2:
+            sev = "high" if cen_st >= 2.5 else "mid"
+            segments.append({
+                "type": "timbre_bright", "start": 0.0, "end": dur, "severity": sev,
+                "detail": f"音色比原唱亮 {cen_st:+.1f} 个半音（质心 {cen_a:.0f} → {cen_b:.0f} Hz）",
+                "values": {"centroid_src": round(cen_a, 1), "centroid_conv": round(cen_b, 1),
+                           "delta_semitones": round(cen_st, 2)},
+            })
+        elif cen_st <= -1.2:
+            sev = "high" if cen_st <= -2.5 else "mid"
+            segments.append({
+                "type": "timbre_dark", "start": 0.0, "end": dur, "severity": sev,
+                "detail": f"音色比原唱暗 {cen_st:.1f} 个半音（质心 {cen_a:.0f} → {cen_b:.0f} Hz）",
+                "values": {"centroid_src": round(cen_a, 1), "centroid_conv": round(cen_b, 1),
+                           "delta_semitones": round(cen_st, 2)},
+            })
+
     segments.sort(key=lambda s: (s["start"], s["type"]))
 
     # 8) 打分
@@ -352,6 +407,10 @@ def analyze(src: np.ndarray, conv: np.ndarray, params: dict, f0_method: str = "y
             "score": score,
             "mean_cents": round(mean_cents, 1),
             "defect_count": len(segments),
+            "centroid_src_hz": round(cen_a, 1),
+            "centroid_conv_hz": round(cen_b, 1),
+            "centroid_delta_st": round(cen_st, 2),
+            "timbre": ("bright" if cen_st >= 1.2 else "dark" if cen_st <= -1.2 else "neutral"),
             "top": [f"{DEFECT_LABEL.get(s['type'], s['type'])} @ {s['start']}–{s['end']}s"
                     for s in sorted(segments, key=lambda s: -SEVERITY_W.get(s["severity"], 2))[:3]],
         },
@@ -415,7 +474,8 @@ def build_plan(segments: list[dict], params: dict, mean_cents: float) -> list[di
         add("protect", 0.03, "抑制跳音", 0.5)
     if "doubled_syllable" in kinds:
         add("index_rate", -0.08, "多出来的起音多半是和声/双轨残留，降检索可减轻", 0.5)
-        plan.setdefault("source_note", {"param": "separate", "from": "Kim-bleedless",
+        plan.setdefault("source_note", {"param": "separate", "stage": "separate",
+                                        "from": "当前分离",
                                         "to": "先剥和声/双轨再转换",
                                         "why": "重复字的根因通常在分离阶段，不在 RVC 参数",
                                         "confidence": 0.8})
@@ -428,6 +488,27 @@ def build_plan(segments: list[dict], params: dict, mean_cents: float) -> list[di
     if "over_smooth" in kinds:
         add("protect", -0.05, "气声和颤音被压平，降低保护", 0.6)
         add("index_rate", 0.05, "提高检索补回细节", 0.45)
+    if "timbre_bright" in kinds or "timbre_dark" in kinds:
+        bright = "timbre_bright" in kinds
+        sign = -1.0 if bright else 1.0
+        strong = any(x["severity"] == "high"
+                     for x in kinds.get("timbre_bright", []) + kinds.get("timbre_dark", []))
+        mag = 2.5 if strong else 1.5
+        plan["eq_air"] = {"param": "eq_air", "stage": "mix", "from": 0.0, "to": round(sign * mag, 1),
+                          "why": (f"比原唱亮，导出时把 8 kHz 以上压 {sign * mag:+.1f} dB，收掉亮边和齿音"
+                                  if bright else
+                                  f"比原唱暗，导出时把 8 kHz 以上加 {mag:+.1f} dB，补回空气感"),
+                          "confidence": 0.7}
+        plan["eq_presence"] = {"param": "eq_presence", "stage": "mix", "from": 0.0,
+                               "to": round(sign * (mag / 2.0), 1),
+                               "why": "3 kHz 靠前度跟着亮度回调一半，避免只改高频、音色出现断层",
+                               "confidence": 0.55}
+        if bright:
+            add("filter_radius", 1, "偏亮常伴随齿音/金属音，加大滤波半径", 0.5)
+            add("index_rate", -0.05, "降一点检索，音色少一点模型味（模型通常偏亮）", 0.45)
+        else:
+            add("index_rate", 0.06, "偏暗时提高检索，从音色库补回高频与细节", 0.5)
+            add("protect", 0.03, "提高保护，减少过度平滑导致的发闷", 0.4)
     if "level_jump" in kinds:
         cur = float(base.get("rms_mix_rate", 0.3))
         add("rms_mix_rate", -0.1 if cur >= 0.3 else 0.1,
@@ -435,6 +516,8 @@ def build_plan(segments: list[dict], params: dict, mean_cents: float) -> list[di
 
     out = [v for k, v in plan.items() if k != "source_note"
            and not (v.get("param") != "f0_method" and float(v["from"]) == float(v["to"]))]
+    for v in out:
+        v.setdefault("stage", "rvc")
     note = plan.get("source_note")
     if note:
         out.append(note)
@@ -491,6 +574,28 @@ def run_model_backend(src: np.ndarray, conv: np.ndarray, model_path: str | Path,
                           }, ensure_ascii=False))
 
 
+def gpu_free_mb() -> float | None:
+    """当前显卡剩余显存（MB）；没有 CUDA 时返回 None。"""
+    try:
+        import torch
+        if not torch.cuda.is_available():
+            return None
+        free, _total = torch.cuda.mem_get_info()
+        return float(free) / 1048576.0
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def model_need_mb(path: str | Path | None) -> float:
+    """粗估模型加载后的显存占用：权重体积 × 2.2（fp16 + 激活/缓冲）。"""
+    if not path:
+        return 0.0
+    p = Path(path)
+    if not p.exists():
+        return 0.0
+    return p.stat().st_size / 1048576.0 * 2.2
+
+
 # --------------------------------------------------------------------------- CLI
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description="PitchIn-Q 歌唱人声诊断")
@@ -505,6 +610,8 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--f0", dest="f0_method", default="yin", choices=["yin", "pyin"])
     ap.add_argument("--wait-gpu", type=float, default=0,
                     help="显存被占用时最多等多少秒（0 = 不排队直接退出 3）")
+    ap.add_argument("--lock-mode", default="auto", choices=["auto", "wait", "none"],
+                    help="auto=显存够就和 RVC 并发跑（不加锁）；wait=必须等锁；none=不加锁直接跑")
     ap.add_argument("--max-seconds", type=float, default=0, help="只分析前 N 秒（调试用）")
     ap.add_argument("--json", action="store_true", help="把完整报告打到 stdout")
     ap.add_argument("--quiet", action="store_true")
@@ -530,15 +637,28 @@ def main(argv: list[str] | None = None) -> int:
             print("model 后端需要 --model-path（或 PITCHINQ_MODEL）；没给权重就用 --backend dsp",
                   file=sys.stderr)
             return 2
-        try:
-            handle = gpulock.hold("pitchinq", timeout=args.wait_gpu)
-        except gpulock.GpuBusy as exc:
-            print(f"显存忙，跳过诊断：{exc}", file=sys.stderr)
-            return 3
+        handle = None
+        mode = args.lock_mode
+        if mode == "auto":
+            need = model_need_mb(args.model_path)
+            free = gpu_free_mb()
+            if free is not None and free >= need + 900:
+                mode = "none"
+                print(f"显存空闲 {free:.0f} MB ≥ 需要 {need:.0f} MB + 900 MB 余量，与 RVC 并发运行",
+                      file=sys.stderr)
+            else:
+                mode = "wait"
+        if mode == "wait":
+            try:
+                handle = gpulock.hold("pitchinq", timeout=args.wait_gpu)
+            except gpulock.GpuBusy as exc:
+                print(f"显存忙，跳过诊断：{exc}", file=sys.stderr)
+                return 3
         try:
             report = run_model_backend(src, conv, args.model_path, params, args.f0_method)
         finally:
-            handle.release()
+            if handle is not None:
+                handle.release()
     else:
         report = analyze(src, conv, params, args.f0_method)
 

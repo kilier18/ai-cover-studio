@@ -96,6 +96,46 @@ def apply_reverb(voc, sr: int, percent: float, decay: float,
     return voc + wet * g
 
 
+def apply_eq(voc, sr: int, air_db: float = 0.0, presence_db: float = 0.0,
+             body_db: float = 0.0):
+    """三段架子/峰值 EQ，专治「比原唱亮太多 / 暗太多」。
+
+    air_db     >0 更亮更空气感（8 kHz 以上高架），<0 收掉齿音与沙沙的亮边
+    presence_db>0 人声更靠前（3 kHz 附近峰值），<0 退到伴奏里
+    body_db    >0 更厚更暖（180 Hz 以下低架），<0 去掉浑浊的低频堆积
+    """
+    import numpy as np
+    from scipy.signal import butter, filtfilt
+
+    if not (air_db or presence_db or body_db):
+        return voc
+
+    def _shelf(x, fc, db, kind):
+        g = 10 ** (db / 20.0)
+        nyq = sr / 2.0
+        fc = min(max(fc, 20.0), nyq * 0.95)
+        b, a = butter(2, fc / nyq, btype=kind)
+        band = filtfilt(b, a, x, axis=0, padlen=min(len(x) - 1, 4096))
+        if kind == "low":
+            # 低架：x + (g-1)*LP(x)
+            return x + (g - 1.0) * band
+        # 高架：x + (g-1)*(x - LP(x))
+        return x + (g - 1.0) * (x - band)
+
+    out = voc
+    if body_db:
+        out = _shelf(out, 180.0, body_db, "low")
+    if presence_db:
+        # 峰值：只抬 2~4 kHz，用带通做钟形
+        nyq = sr / 2.0
+        b, a = butter(2, [2200.0 / nyq, 4200.0 / nyq], btype="band")
+        band = filtfilt(b, a, out, axis=0, padlen=min(len(out) - 1, 4096))
+        out = out + (10 ** (presence_db / 20.0) - 1.0) * band
+    if air_db:
+        out = _shelf(out, 8000.0, air_db, "high")
+    return out
+
+
 def main(argv=None) -> int:
     p = argparse.ArgumentParser(description="mix converted vocal + instrumental")
     p.add_argument("--vocals", required=True)
@@ -112,6 +152,12 @@ def main(argv=None) -> int:
     p.add_argument("--reverb-decay", type=float, default=1.8, help="混响时长（秒）")
     p.add_argument("--reverb-predelay", type=float, default=20.0, help="预延迟（毫秒）")
     p.add_argument("--reverb-damp", type=float, default=6000.0, help="混响高频衰减（Hz）")
+    p.add_argument("--eq-air", type=float, default=0.0,
+                   help="亮度：>0 更亮（8kHz 以上高架），<0 收齿音/亮边，单位 dB（±6 已很明显）")
+    p.add_argument("--eq-presence", type=float, default=0.0,
+                   help="靠前度：>0 人声更贴脸（3kHz 峰值），<0 退后，单位 dB")
+    p.add_argument("--eq-body", type=float, default=0.0,
+                   help="厚度：>0 更暖更厚（180Hz 低架），<0 去浑浊，单位 dB")
     args = p.parse_args(argv)
 
     import numpy as np
@@ -129,6 +175,9 @@ def main(argv=None) -> int:
 
     voc = voc * (10 ** (args.vocal_gain / 20.0))
     inst = inst * (10 ** (args.instrumental_gain / 20.0))
+    if args.eq_air or args.eq_presence or args.eq_body:
+        voc = apply_eq(voc, sr, args.eq_air, args.eq_presence, args.eq_body)
+        print(f"eq: air {args.eq_air:+.1f} / presence {args.eq_presence:+.1f} / body {args.eq_body:+.1f} dB")
     if args.reverb and args.reverb > 0:
         voc = apply_reverb(voc, sr, args.reverb, args.reverb_decay,
                            args.reverb_predelay, args.reverb_damp)

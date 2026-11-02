@@ -22,12 +22,12 @@ from pathlib import Path
 
 from flask import Flask, jsonify, request, send_file
 
-ROOT = Path(__file__).resolve().parent.parent.parent      # 仓库根目录
+ROOT = Path(__file__).resolve().parent.parent.parent      # D:\AI\RVCover
 TOOLS = ROOT / "tools"
 WORK = ROOT / "work"
 UPLOADS = WORK / "_uploads"
 SEP_MODELS = ROOT / "models" / "mdxc"
-LOCAL_MODELS = ROOT / "rvc_models"          # 本地、和 rvc_core 并排的"自己的模型"目录
+LOCAL_MODELS = ROOT / "rvc_models"          # D 盘、和 rvc_core 并排的"自己的模型"目录
 LOCAL_MODELS.mkdir(parents=True, exist_ok=True)
 
 # 所有外部路径集中在 settings.json（由 tools/settings.py 统一读取），换电脑只改那一个文件。
@@ -37,7 +37,7 @@ import gpulock                                            # noqa: E402
 
 SETTINGS = cfg.SETTINGS
 MODEL_ROOTS = cfg.model_roots(only_existing=True) or [
-    {"path": str(LOCAL_MODELS), "label": "本地模型（本地）", "writable": True}]
+    {"path": str(LOCAL_MODELS), "label": "本地模型（D 盘）", "writable": True}]
 RVC_PY = cfg.rvc_python() or Path(str(SETTINGS.get("rvc_python") or ""))
 FFMPEG = cfg.ffmpeg() or Path("ffmpeg")
 cfg.ensure_ffmpeg_on_path()
@@ -89,7 +89,7 @@ def list_rvc_models() -> list[dict]:
                     if f.suffix.lower() in {".jpg", ".png", ".jpeg"}]
             out.append({
                 "id": str(d),                       # 唯一：绝对路径
-                "name": d.name,                      # 文件夹名（如 1..10）
+                "name": d.name,                      # 文件夹名（RVCMAX 是 1..10）
                 "pth": pths[0].name,
                 "index": idx[0].name if idx else None,
                 "index_mb": round(idx[0].stat().st_size / 1048576, 1) if idx else None,
@@ -101,23 +101,26 @@ def list_rvc_models() -> list[dict]:
     return out
 
 
+# 只保留两个场景的最优模型（实测见 work/_sep_eval/bench.py）：
+#   pop 场景 SI-SDR：bs 21.96 > kim_bleedless 21.65
+#   rev 场景尾巴：bs -18.2 dB，kim_bleedless -99 dB（几乎全压掉）
 SEP_LABELS = {
-    "mel_band_roformer_kim_ft2_bleedless_unwa.ckpt": "Kim 无串音版（推荐 · 人声最干净）",
-    "vocals_mel_band_roformer.ckpt": "Kim 原版（保留气声细节）",
-    "model_bs_roformer_ep_317_sdr_12.9755.ckpt": "BS-Roformer（伴奏最好）",
-    "mel_band_roformer_karaoke_becruily.ckpt": "Karaoke 版（伴奏带和声）",
+    "model_bs_roformer_ep_317_sdr_12.9755.ckpt":
+        "标准流行 · BS-Roformer（人声最准 + 伴奏最干净）",
+    "mel_band_roformer_kim_ft2_bleedless_unwa.ckpt":
+        "重混响 / 效果器多 · Kim 无串音（压得住空间尾巴）",
 }
-SEP_DEFAULT = "mel_band_roformer_kim_ft2_bleedless_unwa.ckpt"
-SEP_PURIFY = "mel_band_roformer_bleed_suppressor_v1.ckpt"
+SEP_DEFAULT = "model_bs_roformer_ep_317_sdr_12.9755.ckpt"
+SEP_LISTED = frozenset(SEP_LABELS)
+SEP_PURIFY = "mel_band_roformer_bleed_suppressor_v1.ckpt"  # 净化已关闭，仅留作内部实验
 
 
 def list_sep_models() -> list[dict]:
     out = []
     if SEP_MODELS.is_dir():
         for p in sorted(SEP_MODELS.glob("*.ckpt")):
-            if (p.name.lower().startswith(("melbandroformer_kim",))
-                    or "bleed_suppressor" in p.name or "dereverb" in p.name):
-                continue  # alias / 二次处理专用模型（净化、去混响）不进分离下拉
+            if p.name not in SEP_LISTED:
+                continue  # 只展示两个场景模型；karaoke / dereverb 作为二次处理内部使用
             out.append({
                 "file": p.name,
                 "label": SEP_LABELS.get(p.name, p.name),
@@ -328,10 +331,10 @@ def models_open():
 
 @app.post("/api/models/import")
 def models_import():
-    """把 .pth（可选 .index / 预览图）导入 本地本地模型目录。
+    """把 .pth（可选 .index / 预览图）导入 D 盘本地模型目录。
 
     表单：files=多个文件，name=模型名（可空，默认用 .pth 文件名）
-    会建一个 rvc_models/<name>/ 并把文件放进去。
+    会建一个 D:\AI\RVCover\rvc_models\<name>\ 并把文件放进去。
     """
     files = [f for f in request.files.getlist("files") if f and f.filename]
     if not files:
@@ -407,15 +410,12 @@ def api_separate():
            "--outdir", str(stems),
            "--model", data.get("model") or SEP_DEFAULT,
            "--model-dir", str(SEP_MODELS)]
-    if data.get("purify", False):
-        cmd.append("--purify")
-    if data.get("strip_backing"):
+    # 人声清理：一个开关控制「去和声 / 去混响」的组合
+    clean = str(data.get("clean") or "none").lower()
+    if clean in ("backing", "both"):
         cmd.append("--strip-backing")
-    if data.get("dereverb", True):
+    if clean in ("dereverb", "both"):
         cmd.append("--dereverb")
-        if data.get("keep_inst_reverb"):
-            cmd += ["--keep-inst-reverb",
-                    "--inst-reverb-gain", str(float(data.get("inst_reverb_gain") or 1.0))]
     if data.get("fp16", True):
         cmd += ["--fp16"]
     if data.get("batch"):
@@ -426,14 +426,10 @@ def api_separate():
         cmd += ["--overlap", str(float(data["overlap"]))]
 
     steps = ["分离人声与伴奏"]
-    if data.get("strip_backing"):
+    if clean in ("backing", "both"):
         steps.append("去除和声（只留主唱）")
-    if data.get("purify", False):
-        steps.append("净化人声（去串音）")
-    if data.get("dereverb", True):
+    if clean in ("dereverb", "both"):
         steps.append("去混响 / 去回声")
-    if data.get("dereverb", True) and data.get("keep_inst_reverb"):
-        steps.append("伴奏保留原唱混响")
     jid = new_job(f"分离 · {src.name}", steps, reveal=str(stems))
     start(jid, [{"cmd": cmd,
                  "capture": {"vocals": r"^vocals:\s*(.+)$",
@@ -506,22 +502,48 @@ def api_mix():
     stem = data.get("name") or f"{vocal.stem}+{inst.stem}"
     safe_stem = re.sub(r'[\\/:*?\"<>|]+', "_", stem)
     out = out_dir / f"{safe_stem}.{fmt}"
+    matcher = data.get("matcher") or {}
+    matcher_on = bool(matcher.get("enabled")) and bool(matcher.get("reference"))
+    mix_out = out
+    if matcher_on:
+        pre_dir = out_dir / "_pre"
+        pre_dir.mkdir(parents=True, exist_ok=True)
+        mix_out = pre_dir / f"{safe_stem}.wav"
     cmd = [sys.executable, str(TOOLS / "mix.py"),
-           "--vocals", str(vocal), "--instrumental", str(inst), "--output", str(out),
-           "--format", fmt,
+           "--vocals", str(vocal), "--instrumental", str(inst), "--output", str(mix_out),
+           "--format", "wav" if matcher_on else fmt,
            "--vocal-gain", str(float(data.get("vocal_gain", 0))),
            "--instrumental-gain", str(float(data.get("instrumental_gain", 0)))]
     if not data.get("limiter", True):
         cmd += ["--no-limiter"]
     rev = float(data.get("reverb") or 0)
+    rev_decay = float(data.get("reverb_decay") or 1.8)
+    rev_pre = float(data.get("reverb_predelay") or 25)
+    rev_damp = float(data.get("reverb_damp") or 7000)
     if rev > 0:
-        cmd += ["--reverb", str(rev), "--reverb-decay", str(float(data.get("reverb_decay") or 1.8))]
+        cmd += ["--reverb", str(rev), "--reverb-decay", str(rev_decay),
+                "--reverb-predelay", str(rev_pre), "--reverb-damp", str(rev_damp)]
+    eq_air = float(data.get("eq_air") or 0)
+    eq_pres = float(data.get("eq_presence") or 0)
+    eq_body = float(data.get("eq_body") or 0)
+    if eq_air or eq_pres or eq_body:
+        cmd += ["--eq-air", str(eq_air), "--eq-presence", str(eq_pres), "--eq-body", str(eq_body)]
     steps = ["混音与导出"]
     if rev > 0:
-        steps.insert(0, f"给人声加混响（{rev:.0f}% / {float(data.get('reverb_decay') or 1.8):.1f}s）")
+        steps.insert(0, f"给人声加混响（{rev:.0f}% / {rev_decay:.1f}s / 预延迟 {rev_pre:.0f}ms）")
+    cmds = [{"cmd": cmd, "capture": {"mixed": r"mixed -> (.+?) \("}}]
+    if matcher_on:
+        ref_path = safe_path(matcher["reference"])
+        cmd2 = [sys.executable, str(TOOLS / "master.py"),
+                "--target", str(mix_out), "--reference", str(ref_path),
+                "--output", str(out), "--format", fmt]
+        if not data.get("limiter", True):
+            cmd2.append("--no-limiter")
+        cmds.append({"cmd": cmd2, "capture": {"mastered": r"mastered -> (.+?) \("}})
+        steps.append("母带匹配 Matchering（对齐参考曲的响度与频响）")
     jid = new_job(f"合成 · {out.name}", steps, reveal=str(out))
-    start(jid, [{"cmd": cmd, "capture": {"mixed": r"mixed -> (.+?) \("}}])
-    return jsonify({"job": jid, "out": str(out), "out_rel": rel(out)})
+    start(jid, cmds)
+    return jsonify({"job": jid, "out": str(out), "out_rel": rel(out), "matcher": matcher_on})
 
 
 @app.post("/api/job/<jid>/cancel")
