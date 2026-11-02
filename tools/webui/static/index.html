@@ -145,10 +145,10 @@
           <select id="sepFp16"><option value="1" selected>fp16（快）</option><option value="0">fp32（稳）</option></select>
         </div>
         <div class="field">
-          <label>人声清理 <span class="tip" data-tip="一个开关管两件事：去和声（和声/双轨叠唱特别重、出现口胡重复音时用，多花约 30% 时间）和去混响（录音湿、拖尾回声重时用，多花约 60% 时间）。只做分离最快；两样都做最干净，但气声会略薄。">?</span></label>
+          <label>人声清理 <span class="tip" data-tip="去和声＝把和声/双轨叠唱单独剥掉再转换（多了第二次模型推理，整首耗时约翻倍）。实测：同一首 5:53 的歌，普通分离有人声八度跳变 21 处、去和声后只剩 1 处，评分 79→88，所以默认开。去混响＝录音湿、拖尾回声重时用，再叠一次推理。只做分离最快；两样都做最干净，但气声会略薄。">?</span></label>
           <select id="sepClean">
-            <option value="none" selected>只做分离（推荐）</option>
-            <option value="backing">去和声（和声重时）</option>
+            <option value="none">只做分离（最快）</option>
+            <option value="backing" selected>去和声（推荐 · 和声/双轨重时）</option>
             <option value="dereverb">去混响 / 回声（录音湿时）</option>
             <option value="both">两样都做（最干净 · 最慢）</option>
           </select>
@@ -255,7 +255,7 @@
           <input type="range" id="filterRadius" min="0" max="7" step="1" value="7">
         </div>
         <div class="ctl">
-          <div class="top"><span>输入增益 pre_gain <span class="tip" data-tip="送进 RVC 之前先把干声整体推响（dB），范围 0~30，可以半格微调。气声、和声、弱音在很小声时 RVC 特征提不准，容易口胡；推 +12~+18dB 往往能救回来。注意：源干声峰值本来就接近满量程时，推多少都会被削波卡住（实测某首歌写 +10 只真推了 1.5dB），这时改用下面的「弱音提升」。转换完会自动把响度还原到原来的档位。">?</span></span><span class="val" id="vPreGain">10</span></div>
+          <div class="top"><span>输入增益 pre_gain <span class="tip" data-tip="送进 RVC 之前先把干声整体推响（dB），范围 0~30。气声、和声、弱音在很小声时 RVC 特征提不准，容易口胡，推 +12~+18dB 往往能救回来。注意：转换完会自动把响度还原，所以实测 0/3/6/10 四档在正常母带的歌上几乎没有差别（评分 86~89、亮度同一数值、无削波），只有源干声特别轻（< -30 dBFS）时才需要加；源峰值本来就接近满量程时推多少都会被削波卡住。">?</span></span><span class="val" id="vPreGain">10</span></div>
           <input type="range" id="preGain" min="0" max="30" step="0.5" value="10">
         </div>
         <div class="ctl">
@@ -275,7 +275,7 @@
           <input type="range" id="indexK" min="2" max="128" step="1" value="28">
         </div>
         <div class="ctl">
-          <div class="top"><span>音高算法 f0 <span class="tip" data-tip="rmvpe 综合最好；高音/美声可试 crepe 或 harvest；pm 最快但最粗糙。">?</span></span><span class="val"></span></div>
+          <div class="top"><span>音高算法 f0 <span class="tip" data-tip="crepe 对气声、滑音、颤音的连续性最好（默认，代价是 f0 提取慢约 2 倍）；rmvpe 快且稳，八度跳变最少，长歌首选；harvest 稳但很慢；pm 最快最粗糙。注：实测两种算法对「音色亮度」几乎没影响（同一段 2226 vs 2224 Hz），亮度问题靠音色对齐解决。">?</span></span><span class="val"></span></div>
           <select id="f0Method" style="width:100%">
             <option value="rmvpe">rmvpe（顺滑、快）</option>
             <option value="harvest">harvest（稳、慢）</option>
@@ -391,7 +391,7 @@
         </div>
         <div class="field">
           <label>输出格式 <span class="tip" data-tip="WAV 无损（文件大）；MP3 320k 适合分享；FLAC 无损压缩。">?</span></label>
-          <select id="fmt"><option value="wav" selected>WAV 24bit</option><option value="flac">FLAC</option><option value="mp3">MP3 320k</option><option value="m4a">M4A</option></select>
+          <select id="fmt"><option value="mp3" selected>MP3 320k（默认）</option><option value="wav">WAV 24bit</option><option value="flac">FLAC</option><option value="m4a">M4A</option></select>
         </div>
         <div class="field">
           <label>限幅器 <span class="tip" data-tip="软限幅，防止两轨叠加后削波爆音。关掉会更通透，但峰值可能过 1.0。">?</span></label>
@@ -957,7 +957,7 @@ $('#presetHard').onclick = () => {
   /* 2026-11-01「折中硬骨头 B」：用户在多个音源 × 多个模型上复测，听感普遍优于预设一。
      缘起 ガネメ,TaSk - Chu♡Chu♡Chu（172 BPM 快歌、人声极湿、吐字含糊）：
      去混响会把整首干声吃掉 → 关掉；降检索保咬字，index_k 拉高补音色，crepe 稳音高。 */
-  $('#sepClean').value = 'none';
+  $('#sepClean').value = 'backing'; $('#fmt').value = 'mp3';
   $('#indexMode').value = 'auto'; $('#isHalf').value = '1';
   $('#pitch').value = '0'; $('#indexRate').value = '0.50';
   $('#rmsMixRate').value = '0.30'; $('#protect').value = '0.40';
@@ -965,7 +965,7 @@ $('#presetHard').onclick = () => {
   $('#resampleSr').value = '0'; $('#preGain').value = '10'; $('#autoLevel').value = '0';
   $('#maxSegment').value = '100'; $('#indexK').value = '28';
   syncLabels();
-  toast('已套用硬骨头预设 B：去混响关 + index 0.50 / rms 0.30 / protect 0.40 / crepe / index_k 28 / pre_gain 10 / 单段 100s');
+  toast('已套用硬骨头预设 B：去和声 + index 0.50 / rms 0.30 / protect 0.40 / crepe / index_k 28 / pre_gain 10 / 单段 100s / MP3 320k');
 };
 
 $('#runPrev').onclick = async () => {

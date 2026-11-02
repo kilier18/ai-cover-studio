@@ -229,10 +229,13 @@ def analyze(src: np.ndarray, conv: np.ndarray, params: dict, f0_method: str = "y
     both = va & vb & np.isfinite(f0a) & np.isfinite(f0b) & (f0a > 0) & (f0b > 0)
     cents = np.full(m, np.nan)
     cents[both] = 1200 * np.log2(f0b[both] / f0a[both])
-    mean_cents = float(np.nanmean(cents)) if np.any(np.isfinite(cents)) else 0.0
-    std_cents = float(np.nanstd(cents)) if np.any(np.isfinite(cents)) else 0.0
+    # 八度错（crepe/yin 偶发）会把均值拽走：统计只用 ±600 音分内的帧，且用中位数
+    fin = np.isfinite(cents)
+    core = fin & (np.abs(cents) <= 600)
+    mean_cents = float(np.nanmedian(cents[core])) if core.any() else 0.0
+    std_cents = float(np.nanstd(cents[core])) if core.any() else 0.0
 
-    big = np.isfinite(cents) & (np.abs(cents) > 60)
+    big = core & (np.abs(cents) > 60)
     for s, e in runs(big, int(0.12 * SR / HOP)):
         seg = cents[s:e]
         c = float(np.mean(seg))
@@ -389,10 +392,12 @@ def analyze(src: np.ndarray, conv: np.ndarray, params: dict, f0_method: str = "y
 
     segments.sort(key=lambda s: (s["start"], s["type"]))
 
-    # 8) 打分
-    score = 100
+    # 8) 打分：按「每分钟缺陷密度」扣分，长歌短歌同一把尺
+    pen = 0.0
     for s in segments:
-        score -= SEVERITY_W.get(s["severity"], 2) * (1.0 if s["type"] != "offset" else 0.5)
+        pen += SEVERITY_W.get(s["severity"], 2) * (1.0 if s["type"] != "offset" else 0.5)
+    minutes = max(len(a) / SR / 60.0, 0.1)
+    score = 100 - pen / minutes * 0.33
     score = int(max(0, min(100, round(score))))
 
     return {
