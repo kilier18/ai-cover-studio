@@ -107,14 +107,16 @@ def match_timbre(y: np.ndarray, ref: np.ndarray, max_db: float = 12.0,
     加速版：tilt 搜索在谱域解析式完成（只做 1 次 STFT + 1 次 istft），
     不再对每个候选 tilt 都完整正反变换一遍。
     """
+    # 只在对齐的那段上统计，但**不要截断输出**：之前把 y 截成 min(len(y), len(ref))，
+    # 参考干声比成品短几十毫秒时尾巴就被吃掉，后面 voc+inst 直接 broadcast 报错。
     n = min(len(y), len(ref))
-    y, ref = y[:n], ref[:n]
-    mag, rms = _frames(y)
-    mag_r, rms_r = _frames(ref)
+    y_cmp, ref_cmp = y[:n], ref[:n]
+    mag, rms = _frames(y_cmp)
+    mag_r, rms_r = _frames(ref_cmp)
     c_ref = _centroid_of(mag_r, rms_r)
     st_before = _st(_centroid_of(mag, rms), c_ref) if mag is not None else 0.0
 
-    g0 = ltas_gain(y, ref, max_db=max_db)
+    g0 = ltas_gain(y_cmp, ref_cmp, max_db=max_db)
     freqs = librosa.fft_frequencies(sr=SR, n_fft=N_FFT)
     octv = np.log2(np.maximum(freqs, 20) / 1000.0)
 
@@ -145,6 +147,10 @@ def match_timbre(y: np.ndarray, ref: np.ndarray, max_db: float = 12.0,
         best = {"st_after": best_st, "tilt_db_oct": best_tilt, "gain": best_gain}
 
     best["audio"] = _apply(y, best.pop("gain"))
+    # 输出必须与输入等长（下游会直接相加）
+    if len(best["audio"]) != len(y):
+        a = best["audio"]
+        best["audio"] = a[:len(y)] if len(a) > len(y) else np.pad(a, (0, len(y) - len(a)))
     best.update({"st_before": st_before, "max_db": max_db})
     return best
 

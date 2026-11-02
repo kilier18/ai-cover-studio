@@ -136,6 +136,19 @@ def apply_eq(voc, sr: int, air_db: float = 0.0, presence_db: float = 0.0,
     return out
 
 
+def _fit_len(a, n):
+    """把长度对齐到 n：共振峰 / 音色对齐这类频域处理会让样本数漂几十毫秒，不裁就直接加爆。"""
+    import numpy as np
+
+    a = np.asarray(a)
+    if len(a) == n:
+        return a
+    if len(a) > n:
+        return a[:n]
+    pad = ((0, n - len(a)), (0, 0)) if a.ndim > 1 else (0, n - len(a))
+    return np.pad(a, pad)
+
+
 def main(argv=None) -> int:
     p = argparse.ArgumentParser(description="mix converted vocal + instrumental")
     p.add_argument("--vocals", required=True)
@@ -187,6 +200,7 @@ def main(argv=None) -> int:
             mono = voc.mean(axis=1) if voc.ndim > 1 else voc
             z = _fshift(np.asarray(mono, dtype=np.float32), sr, args.formant)
             voc = np.stack([z] * voc.shape[1], axis=1) if voc.ndim > 1 else z
+            voc = _fit_len(voc, n)
             print(f"formant: x{args.formant:.2f}（音高不变，共振峰整体缩放）")
         except Exception as e:  # noqa: BLE001
             print(f"formant: 跳过（{e}）")
@@ -203,7 +217,7 @@ def main(argv=None) -> int:
             fixed = res["audio"]
             if voc.ndim > 1:
                 fixed = np.stack([fixed] * voc.shape[1], axis=1)
-            voc = fixed
+            voc = _fit_len(fixed, n)
             print(f"timbre: {res['st_before']:+.2f} -> {res['st_after']:+.2f} 半音 "
                   f"(tilt {res['tilt_db_oct']:+.1f} dB/oct)")
         except Exception as e:  # noqa: BLE001
@@ -218,6 +232,9 @@ def main(argv=None) -> int:
         voc = apply_reverb(voc, sr, args.reverb, args.reverb_decay,
                            args.reverb_predelay, args.reverb_damp)
         print(f"reverb: {args.reverb:.0f}% / {args.reverb_decay:.1f}s on the converted vocal")
+    # 保险：任何一步让长度漂了，都对齐到 n 再相加（曾经这里直接 ValueError: could not be broadcast）
+    voc = _fit_len(voc, n)
+    inst = _fit_len(inst, n)
     mix = voc + inst
 
     if not args.no_limiter:
