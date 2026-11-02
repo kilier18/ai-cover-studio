@@ -538,7 +538,18 @@ def api_mix():
     eq_body = float(data.get("eq_body") or 0)
     if eq_air or eq_pres or eq_body:
         cmd += ["--eq-air", str(eq_air), "--eq-presence", str(eq_pres), "--eq-body", str(eq_body)]
+    tm = data.get("timbre_match") or {}
+    if tm.get("enabled") and tm.get("reference"):
+        try:
+            tm_ref = safe_path(tm["reference"])
+            cmd += ["--timbre-match", str(tm_ref)]
+        except Exception:      # noqa: BLE001
+            tm_ref = None
+    else:
+        tm_ref = None
     steps = ["混音与导出"]
+    if tm_ref:
+        steps.insert(0, "音色对齐（按原唱频谱校正）")
     if rev > 0:
         steps.insert(0, f"给人声加混响（{rev:.0f}% / {rev_decay:.1f}s / 预延迟 {rev_pre:.0f}ms）")
     cmds = [{"cmd": cmd, "capture": {"mixed": r"mixed -> (.+?) \("}}]
@@ -728,6 +739,9 @@ def api_diagnose():
            "--source", str(src), "--converted", str(conv), "--out", str(out),
            "--lock-mode", lock_mode,
            "--wait-gpu", str(float(data.get("wait_gpu") or 300))]
+    max_sec = float(data.get("max_seconds") or 0)
+    if max_sec > 0:
+        cmd += ["--max-seconds", str(max_sec)]
     params = data.get("params")
     if isinstance(params, dict) and params:
         pfile = diag / f"{jid}.params.json"

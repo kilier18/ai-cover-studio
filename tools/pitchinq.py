@@ -496,10 +496,10 @@ def build_plan(segments: list[dict], params: dict, mean_cents: float,
                      for x in kinds.get("timbre_bright", []) + kinds.get("timbre_dark", []))
         mag = 2.5 if strong else 1.5
         plan["eq_air"] = {"param": "eq_air", "stage": "mix", "from": 0.0, "to": round(sign * mag, 1),
-                          "why": (f"比原唱亮，导出时把 8 kHz 以上压 {sign * mag:+.1f} dB，收掉亮边和齿音"
+                          "why": (f"备选（不开音色对齐时）：把 8 kHz 以上压 {sign * mag:+.1f} dB，收掉亮边和齿音"
                                   if bright else
-                                  f"比原唱暗，导出时把 8 kHz 以上加 {mag:+.1f} dB，补回空气感"),
-                          "confidence": 0.75}
+                                  f"备选（不开音色对齐时）：把 8 kHz 以上加 {mag:+.1f} dB，补回空气感"),
+                          "confidence": 0.6}
         plan["eq_presence"] = {"param": "eq_presence", "stage": "mix", "from": 0.0,
                                "to": round(sign * (mag / 2.0), 1),
                                "why": "3 kHz 靠前度跟着亮度回调一半，避免只改高频、音色出现断层",
@@ -507,6 +507,11 @@ def build_plan(segments: list[dict], params: dict, mean_cents: float,
         # 2026-11-02 标定：index_rate / protect / filter_radius / rms_mix_rate 对质心的
         # 影响都 < 0.2 半音（实测 1751/1755/1730 Hz、1759 Hz、1758/1760 Hz、1763/1749 Hz），
         # 所以亮度问题不能靠 RVC 参数修，只能换模型或走导出 EQ。
+        plan["timbre_match"] = {"param": "timbre_match", "stage": "mix", "from": "关",
+                                "to": "开「音色对齐（校正到原唱音色）」",
+                                "why": ("按原唱干声的长时频谱做频带校正，实测 4 个模型 "
+                                        "−6.6~+0.7 半音的偏差都能拉回 ±0.5 半音，且不改变咬字/颤音"),
+                                "confidence": 0.85}
         plan["model"] = {"param": "model", "stage": "rvc", "from": base.get("model", "当前音色模型"),
                          "to": "换成频谱质心更接近原唱的音色模型（否则用 EQ 补偿）",
                          "why": (f"{abs(timbre_st):.1f} 半音的亮度差主要来自模型本身的音色；"
@@ -522,7 +527,7 @@ def build_plan(segments: list[dict], params: dict, mean_cents: float,
         if k == "source_note":
             continue
         try:
-            if v.get("param") not in ("f0_method", "model") and float(v["from"]) == float(v["to"]):
+            if v.get("param") not in ("f0_method", "model", "timbre_match") and float(v["from"]) == float(v["to"]):
                 continue
         except (TypeError, ValueError):
             pass          # 非数值型（model 这类文本建议）保留

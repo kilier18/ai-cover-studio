@@ -158,6 +158,10 @@ def main(argv=None) -> int:
                    help="靠前度：>0 人声更贴脸（3kHz 峰值），<0 退后，单位 dB")
     p.add_argument("--eq-body", type=float, default=0.0,
                    help="厚度：>0 更暖更厚（180Hz 低架），<0 去浑浊，单位 dB")
+    p.add_argument("--timbre-match", default="",
+                   help="参考人声（源唱干声）：把线上人声的频谱形状对齐到它")
+    p.add_argument("--timbre-max-db", type=float, default=12.0,
+                   help="音色对齐时单频点最大增益（dB）")
     args = p.parse_args(argv)
 
     import numpy as np
@@ -172,6 +176,24 @@ def main(argv=None) -> int:
     n = max(len(voc), len(inst))
     voc = np.pad(voc, ((0, n - len(voc)), (0, 0)))
     inst = np.pad(inst, ((0, n - len(inst)), (0, 0)))
+
+    if args.timbre_match:
+        try:
+            sys.path.insert(0, str(Path(__file__).resolve().parent))
+            from timbre import match_timbre, load_mono as _tm_load
+
+            ref = _tm_load(Path(args.timbre_match))
+            mono = voc.mean(axis=1) if voc.ndim > 1 else voc
+            res = match_timbre(np.asarray(mono, dtype=np.float32), ref,
+                              max_db=args.timbre_max_db)
+            fixed = res["audio"]
+            if voc.ndim > 1:
+                fixed = np.stack([fixed] * voc.shape[1], axis=1)
+            voc = fixed
+            print(f"timbre: {res['st_before']:+.2f} -> {res['st_after']:+.2f} 半音 "
+                  f"(tilt {res['tilt_db_oct']:+.1f} dB/oct)")
+        except Exception as e:  # noqa: BLE001
+            print(f"timbre: 跳过（{e}）")
 
     voc = voc * (10 ** (args.vocal_gain / 20.0))
     inst = inst * (10 ** (args.instrumental_gain / 20.0))

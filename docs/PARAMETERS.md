@@ -101,3 +101,11 @@ A/B 听出来再应用到整首。**不要用 f0 指标判断音质**——跳�
 3. `tools/webui/static/index.html`：加滑杆 + `params()` + `syncLabels()` + 预设复位。
 
 改完跑一次 `python tools\check_env.py`，再用 20 秒片段试听。
+
+### 音色对齐（timbre match）
+
+- 勾选框：第 3 步「音色对齐（校正到原唱音色）」，默认开；参考音＝第 1 步分离出的干声。
+- 作用：按原唱干声的长时频谱给转换后的人声做频带校正，把「模型天生偏亮/偏暗 3–7 半音」拉回 ±0.5 半音（4 个模型实测）。
+- 不改音高/节奏/咬字；单频点最大 ±12 dB；20 秒素材约 1–2 秒。
+- 与 EQ 的关系：开启后诊断自动把 eq_air / eq_presence 填 0，避免二次提亮。
+- 命令：tools/timbre.py --vocal X --reference dry --output Y，或 mix.py --timbre-match dry.wav。

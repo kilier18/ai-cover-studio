@@ -439,6 +439,12 @@
           </label>
         </div>
         <div class="field">
+          <label>音色对齐 <span class="tip" data-tip="RVC 模型的音色天生可能比原唱亮/暗 3~7 个半音，改 index_rate、protect 都动不了它。打开后按原唱干声的长时频谱给这条人声做频带校正——实测能把 4 个模型 −6.6~+0.7 半音的偏差拉回 ±0.5。参考用第 1 步分离出的干声；没有干声时自动跳过。">?</span></label>
+          <label style="display:flex;gap:6px;align-items:center;font-weight:400">
+            <input type="checkbox" id="timbreOn" checked> 校正到原唱音色
+          </label>
+        </div>
+        <div class="field">
           <label>成品名</label>
           <input type="text" id="outName" placeholder="留空自动命名" style="width:180px">
         </div>
@@ -804,18 +810,22 @@ function autoReverb(){
 function applyDiag(rep){
   if(!rep || !rep.summary) return null;
   const plan = (rep.param_plan || []).filter(p => p.stage === 'mix');
+  const tmOn = !!($('#timbreOn') && $('#timbreOn').checked);
   const filled = [];
   for(const p of plan){
     const id = DIAG_TO_ID[p.param];
     if(!id) continue;
-    setSlider(id, p.to);
-    filled.push(`${p.param} ${Number(p.to).toFixed(1)}dB`);
+    // 音色对齐已经按原唱频谱校正过，再叠 EQ 会二次提亮 → 自动填 0
+    const v = tmOn ? 0 : p.to;
+    setSlider(id, v);
+    filled.push(`${p.param} ${Number(v).toFixed(1)}dB`);
   }
   const sm = rep.summary;
   const dir = sm.timbre === 'bright' ? '偏亮' : sm.timbre === 'dark' ? '偏暗' : '接近原唱';
   const txt = `诊断：质心 ${Math.round(sm.centroid_src_hz)} → ${Math.round(sm.centroid_conv_hz)} Hz`
     + `（${Number(sm.centroid_delta_st).toFixed(1)} 半音 · ${dir}）`
-    + (filled.length ? ` → 已填 ${filled.join(' / ')}` : ' → 无需改 EQ');
+    + (tmOn ? ' → 交给「音色对齐」按频谱校正（EQ 不叠加）'
+            : (filled.length ? ` → 已填 ${filled.join(' / ')}` : ' → 无需改 EQ'));
   const note = $('#diagNote');
   if(note) note.textContent = txt;
   $('#diagApply').disabled = !filled.length;
@@ -1037,6 +1047,8 @@ $('#run3').onclick = async () => {
                  reverb_damp: parseFloat($('#revDamp').value) || 7000,
                  matcher: { enabled: $('#matchOn').checked && !!(S.song && S.song.path),
                             reference: S.song ? S.song.path : null },
+                 timbre_match: { enabled: $('#timbreOn').checked && !!S.vocal,
+                                 reference: S.vocal || null },
                  format: $('#fmt').value, limiter: $('#limiter').value === '1',
                  name: $('#outName').value.trim() || null };
   $('#run3').disabled = true;
