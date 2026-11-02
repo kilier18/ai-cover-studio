@@ -1,7 +1,11 @@
-# 本地 AI 翻唱流水线（D:\AI\RVCover）
+# 本地 AI 翻唱流水线
+
+**当前版本：v1.0 正式版（2026-11-02）** ｜ [下载整合包](https://github.com/kilier18/ai-cover-studio/releases/tag/v1.0) ｜ [更新记录](docs/CHANGELOG.md) ｜ [手册](docs/MANUAL.md) ｜ [踩坑](docs/LESSONS.md)
+
+> 全部本地运行：分离、变声、混音、诊断都不联网，不上传你的音频。
 
 完全自包含：Python 3.11、RVC 运行时（3.9 + torch 2.0）、RVC 内核、ffmpeg、分离模型、
-RVC 模型、临时文件**全部在 `D:\AI\RVCover` 内**。不依赖也不读取任何外部 RVC 安装，
+RVC 模型、临时文件**全部在 `<项目目录>` 内**。不依赖也不读取任何外部 RVC 安装，
 把别处的 RVCMAX 删掉照样能跑（模型已复制到 `rvc_models\`）。
 
 ```
@@ -58,7 +62,7 @@ RVC 模型、临时文件**全部在 `D:\AI\RVCover` 内**。不依赖也不读�
 ## 一键运行（命令行）
 
 ```bash
-cd /d/AI/RVCover
+cd /d <项目目录>
 
 # 用 RVCMAX 里 10 号模型（Yukkuri），升/降调 0
 ./py311/python.exe tools/pipeline.py "D:/path/song.mp3" --model-id 10 --pitch 0
@@ -107,7 +111,7 @@ cd /d/AI/RVCover
 ## 目录结构
 
 ```
-D:\AI\RVCover\
+<项目目录>\
   settings.json     ★ 唯一的路径配置（rvc_python / ffmpeg / rvc_core / model_roots）
   py311\            嵌入式 Python 3.11 + torch 2.4.1+cu121 + audio-separator 0.48
   rvc_core\         RVCMAX RVC_Core 的只读副本（infer/ configs/ assets/hubert + assets/rmvpe）
@@ -152,7 +156,7 @@ D:\AI\RVCover\
 - `pre_gain`（输入增益）：送进 RVC 前先整体推响，转换完自动匹配回原响度。
   弱音、气声、和声层在小音量下 RVC 的特征提不准就会口胡，+12~+18dB 常有改善；
   推太狠会被峰值上限卡住（日志会打印实际推多少 dB，常见只有 +1~+3dB）。
-- 火绒拦截：把 `D:\AI\RVCover` 加进「防护中心 → 信任区」，否则快捷方式可能被拦或被杀软误删。
+- 火绒拦截：把 `<项目目录>` 加进「防护中心 → 信任区」，否则快捷方式可能被拦或被杀软误删。
 - **拿时间换质量的两个滑杆**（已进默认预设，不用动）：
   - **单段推理时长**（默认 **100s**，内核原值 65s）：一次丢给模型的最长音频。不切段时强制切点更少，
     长句/连唱/换气不断——用户实测「气息超级稳定，而且没有很慢」，后又把默认从 90 提到 100。

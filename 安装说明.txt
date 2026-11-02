@@ -1,0 +1,30 @@
+AI 翻唱工坊 v1.0 正式版（2026-11-02）
+=====================================
+
+解压到任意目录（建议路径不含空格/特殊符号），然后：
+
+1) 装环境（只做一次）
+   右键「scripts\setup.ps1」→ 用 PowerShell 运行：
+       powershell -ExecutionPolicy Bypass -File scripts\setup.ps1
+   它会建 .venv、装 torch cu121 + 依赖、下 ffmpeg 到 bin\、生成 settings.json。
+
+2) 补两样东西（脚本装不了）
+   · 分离模型：第一次跑分离会自动下载到 models\mdxc（约 1.5 GB）
+   · RVC 变声（可选）：
+       - 随便一个 RVC 整合包里的 runtime\python.exe → 填进 settings.json 的 rvc_python
+       - 把它的 infer/ configs/ assets/ 复制成 rvc_core       - 音色模型（.pth + .index）放进 rvc_models\<名字>     不装 RVC 也能用：分离、混音、诊断都正常，只有第 2 步变声不可用。
+
+3) 启动
+   双击 start.bat，浏览器会自动打开 http://127.0.0.1:8765
+
+4) 第一次用
+   先点右上角「🔥 预热」，之后每个任务的模型加载就是内存速度。
+
+文档
+   docs\MANUAL.md      9 章手册：上手、参数总表、诊断怎么读、故障排查
+   docs\CHANGELOG.md   v1.0 更新记录
+   docs\LESSONS.md     踩坑与经验（21 条）
+   DEPLOY.md            从零部署（手工版，含每一步命令）
+
+授权
+   MIT。分离/变声的模型各有各的许可，自己确认后再商用。

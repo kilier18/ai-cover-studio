@@ -23,7 +23,7 @@ from pathlib import Path
 
 from flask import Flask, jsonify, request, send_file
 
-ROOT = Path(__file__).resolve().parent.parent.parent      # D:\AI\RVCover
+ROOT = Path(__file__).resolve().parent.parent.parent      # <项目目录>
 TOOLS = ROOT / "tools"
 WORK = ROOT / "work"
 UPLOADS = WORK / "_uploads"
@@ -365,7 +365,7 @@ def models_import():
     """把 .pth（可选 .index / 预览图）导入 D 盘本地模型目录。
 
     表单：files=多个文件，name=模型名（可空，默认用 .pth 文件名）
-    会建一个 D:\AI\RVCover\rvc_models\<name>\ 并把文件放进去。
+    会建一个 <项目目录>\rvc_models\<name>\ 并把文件放进去。
     """
     files = [f for f in request.files.getlist("files") if f and f.filename]
     if not files:
