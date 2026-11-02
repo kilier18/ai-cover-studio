@@ -33,6 +33,7 @@ LOCAL_MODELS.mkdir(parents=True, exist_ok=True)
 # 所有外部路径集中在 settings.json（由 tools/settings.py 统一读取），换电脑只改那一个文件。
 sys.path.insert(0, str(TOOLS))
 import settings as cfg                                    # noqa: E402
+import gpulock                                            # noqa: E402
 
 SETTINGS = cfg.SETTINGS
 MODEL_ROOTS = cfg.model_roots(only_existing=True) or [
@@ -168,6 +169,21 @@ def finish(jid: str, result=None, error=None, canceled: bool = False) -> None:
 
 
 def run_job(jid: str, steps: list[dict]) -> None:
+    """跑一个作业：先拿跨进程显存锁（RVC 与 PitchIn-Q 互斥），再跑命令。"""
+    lock = None
+    try:
+        lock = gpulock.hold(f"webui:{jid}", timeout=float(os.environ.get("GPULOCK_WAIT", "0") or 0))
+    except gpulock.GpuBusy as exc:
+        jlog(jid, f"显存忙，作业没开始：{exc}")
+        finish(jid, error=f"显存忙：{exc}")
+        return
+    try:
+        _run_job_inner(jid, steps)
+    finally:
+        lock.release()
+
+
+def _run_job_inner(jid: str, steps: list[dict]) -> None:
     with GPU:
         with JOBS_LOCK:
             if JOBS[jid]["cancel"]:
@@ -651,6 +667,60 @@ def api_cleanup_run():
         kept_final = sum(1 for f in (WORK / "final").rglob("*") if f.is_file())
     return jsonify({"ok": not errors, "freed_mb": round(freed / 1024 / 1024, 1),
                     "removed": removed, "errors": errors, "kept_final": kept_final})
+
+
+@app.post("/api/diagnose")
+def api_diagnose():
+    """PitchIn-Q 诊断（只给 DSH 主动下发用，不自动挂在转换流程后面）。
+
+    入参：{"source": 干声, "converted": RVC 输出, "params": {...}, "wait_gpu": 300}
+    返回 job id；报告在 GET /api/diagnose/<job> 里取。
+    """
+    data = request.get_json(silent=True) or {}
+    try:
+        src = safe_path(str(data["source"]))
+        conv = safe_path(str(data["converted"]))
+    except (KeyError, ValueError) as exc:
+        return jsonify({"error": f"参数不对：{exc}"}), 400
+    if not src.is_file() or not conv.is_file():
+        return jsonify({"error": "音频文件不存在"}), 400
+
+    diag = WORK / "_diag"
+    diag.mkdir(parents=True, exist_ok=True)
+    jid = new_job(f"诊断 · {src.stem} vs {conv.stem}", ["PitchIn-Q 诊断"], reveal=str(diag))
+    out = diag / f"{jid}.json"
+    cmd = [sys.executable, str(TOOLS / "pitchinq.py"),
+           "--source", str(src), "--converted", str(conv), "--out", str(out),
+           "--wait-gpu", str(float(data.get("wait_gpu") or 300))]
+    params = data.get("params")
+    if isinstance(params, dict) and params:
+        pfile = diag / f"{jid}.params.json"
+        pfile.write_text(json.dumps(params, ensure_ascii=False), encoding="utf-8")
+        cmd += ["--params", str(pfile)]
+    start(jid, [{"cmd": cmd, "capture": {}}])
+    return jsonify({"job": jid, "report": str(out), "report_rel": rel(out)})
+
+
+@app.get("/api/diagnose/<jid>")
+def api_diagnose_get(jid: str):
+    with JOBS_LOCK:
+        job = JOBS.get(jid)
+        if job is None:
+            return jsonify({"error": "no such job"}), 404
+        status = job["status"]
+        log = job["log"][-40:]
+        job_result = job.get("result")
+        error = job.get("error")
+    out = WORK / "_diag" / f"{jid}.json"
+    report = None
+    if out.is_file():
+        try:
+            report = json.loads(out.read_text(encoding="utf-8"))
+        except ValueError:
+            report = None
+    return jsonify({"id": jid, "status": status, "error": error, "log": log,
+                    "result": job_result, "report": report,
+                    "report_rel": rel(out) if out.is_file() else None})
 
 
 @app.post("/api/shutdown")

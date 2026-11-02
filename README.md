@@ -52,6 +52,7 @@
 |---|---|
 | 第一次装 | [DEPLOY.md](DEPLOY.md) —— 全新电脑从零，10 步 + 报错表 |
 | 想调出好效果 | [docs/PARAMETERS.md](docs/PARAMETERS.md) —— 每个参数到底影响什么、哪些内核不支持 |
+| 想让它自己诊断 | [docs/PITCHINQ.md](docs/PITCHINQ.md) —— PitchIn-Q：缺陷定位（带时间区间）+ 参数建议，按需调用、不常驻显存 |
 | 接手维护 | [MAINTAINER.md](MAINTAINER.md) —— 文件地图、三种常见改动、内核契约、发布流程 |
 
 ## 快速开始
@@ -78,14 +79,16 @@ start.bat
 ├── settings.example.json       复制成 settings.json 后改路径，代码不用动
 ├── requirements.txt
 ├── DEPLOY.md                   全新电脑从零部署（10 步 + 报错表）
-├── docs/                       PARAMETERS.md（参数全表）、flow.txt（流程示意）
+├── docs/                       PARAMETERS.md（参数全表）、PITCHINQ.md（诊断器契约）、flow.txt（流程示意）
 ├── tools/
 │   ├── settings.py             所有外部路径的唯一来源
 │   ├── check_env.py            环境自检（依赖 / GPU / ffmpeg / RVC 内核 / 模型）
 │   ├── separate.py             ① 分离（含去和声 / 去混响 / 回填混响）
-│   ├── rvc_convert.py          ② RVC 变声（隔离内核副本）
+│   ├── rvc_convert.py          ② RVC 变声（隔离内核副本，跑前拿显存锁）
 │   ├── mix.py                  ③ 混音
 │   ├── pipeline.py             命令行一次性跑完三步
+│   ├── gpulock.py              跨进程显存互斥（RVC ↔ PitchIn-Q，文件锁）
+│   ├── pitchinq.py             ④ 诊断：定位缺陷 + 给参数方案（按需启动）
 │   ├── export_roots.ps1        （可选）导出系统根证书，绕过公司代理的 TLS 拦截
 │   └── webui/app.py + static/  网页界面（Flask）
 ├── models/mdxc/                放分离模型（.ckpt，首次使用会自动下载）

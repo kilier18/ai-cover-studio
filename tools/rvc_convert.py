@@ -55,7 +55,7 @@ def ensure_ffmpeg() -> None:
     raise RuntimeError("ffmpeg.exe not found on PATH")
 
 
-def main(argv=None) -> int:
+def _main(argv=None) -> int:
     p = argparse.ArgumentParser(description="RVC inference (isolated copy of RVC runtime core)")
     p.add_argument("--input", required=True)
     p.add_argument("--output", required=True)
@@ -285,6 +285,31 @@ def main(argv=None) -> int:
     sf.write(output_path, audio, int(out_sr))
     print(f"OK {info} -> {output_path} (sr={out_sr}, samples={len(audio)})")
     return 0
+
+
+def main(argv=None) -> int:
+    """拿显存锁再跑：RVC 与 PitchIn-Q 诊断不能同时占这张卡。
+
+    网页端作业会自己先拿锁，并通过环境变量 GPULOCK_HELD=1 传下来，
+    这时这里直接放行（同一进程树重入）。命令行单独跑时，
+    `GPULOCK_WAIT=秒` 可以排队等（默认 0 = 显存忙就退出 3）。
+    """
+    try:
+        import gpulock
+    except Exception:                                     # noqa: BLE001
+        gpulock = None
+    if gpulock is None or os.environ.get(gpulock.ENV_FLAG) == "1":
+        return _main(argv)
+    wait = float(os.environ.get("GPULOCK_WAIT", "0") or 0)
+    try:
+        handle = gpulock.hold("rvc", timeout=wait)
+    except gpulock.GpuBusy as exc:
+        print(f"GPU busy: {exc}", file=sys.stderr)
+        return 3
+    try:
+        return _main(argv)
+    finally:
+        handle.release()
 
 
 if __name__ == "__main__":
